@@ -678,6 +678,84 @@ $("globalToggle").addEventListener("change", async (e) => {
   }
 });
 
+
+async function startStarsSubscription(planCode) {
+  try {
+    const data = await api("invoice", { method:"POST", body:{ plan_code:planCode } });
+    if (!data.invoice_url) throw new Error("invoice_unavailable");
+
+    if (tg && typeof tg.openInvoice === "function") {
+      tg.openInvoice(data.invoice_url, (status) => {
+        if (status === "paid") {
+          toast("Payment received. Activating subscription…");
+          setTimeout(() => loadAll().catch(() => {}), 1500);
+        } else if (status === "cancelled") {
+          toast("Payment cancelled");
+        } else if (status === "failed") {
+          toast("Payment failed");
+        } else if (status === "pending") {
+          toast("Payment is pending");
+        }
+      });
+    } else {
+      window.location.href = data.invoice_url;
+    }
+  } catch (err) {
+    const map = {
+      trial_still_active: "Your free trial is still active. Subscribe after it ends.",
+      referral_bonus_active: "Your referral Pro hour is active. Subscribe after it ends.",
+      stars_price_not_configured: "This plan's Stars price is not configured yet.",
+      already_subscribed: "You already have this subscription.",
+      active_subscription_exists: "Cancel your current subscription renewal and wait for the paid period to end before switching plans."
+    };
+    toast(map[err.message] || ("Could not start checkout: " + err.message));
+  }
+}
+
+$("basicSubscribeBtn").addEventListener("click", () => startStarsSubscription("basic"));
+$("proSubscribeBtn").addEventListener("click", () => startStarsSubscription("pro"));
+
+$("subscriptionRenewalBtn").addEventListener("click", async () => {
+  const action = $("subscriptionRenewalBtn").dataset.action;
+  if (action === "cancel") {
+    if (!confirm("Cancel automatic renewal? Your paid access will continue until the current period ends.")) return;
+    try {
+      await api("cancel_subscription", { method:"POST", body:{} });
+      toast("Automatic renewal canceled");
+      await loadAll();
+    } catch (err) {
+      toast("Could not cancel renewal: " + err.message);
+    }
+  } else if (action === "resume") {
+    try {
+      await api("resume_subscription", { method:"POST", body:{} });
+      toast("Automatic renewal re-enabled");
+      await loadAll();
+    } catch (err) {
+      toast("Could not re-enable renewal: " + err.message);
+    }
+  }
+});
+
+$("saveStarsPricesBtn").addEventListener("click", async () => {
+  const basic = Number($("basicStarsPrice").value);
+  const pro = Number($("proStarsPrice").value);
+  if (!Number.isInteger(basic) || !Number.isInteger(pro) || basic < 1 || pro <= basic) {
+    toast("Use whole-Star prices, with Pro higher than Basic.");
+    return;
+  }
+  try {
+    await api("owner_plan_prices", {
+      method:"POST",
+      body:{ basic_stars:basic, pro_stars:pro }
+    });
+    toast("Telegram Stars prices updated");
+    await loadAll();
+  } catch (err) {
+    toast(err.message === "invalid_stars_prices" ? "Invalid Stars prices." : ("Could not save: " + err.message));
+  }
+});
+
 $("copyReferralBtn").addEventListener("click", async () => {
   const link = $("referralLink").value;
   if (!link) return;
