@@ -16,6 +16,7 @@ const state = {
   media: [],
   reviews: [],
   logs: [],
+  ownerStats: null,
   authMode: "login"
 };
 
@@ -201,11 +202,25 @@ function ruleName(rule) {
   return "#" + rule.id + " · " + labelForRule(rule) + " · " + triggerDescription(rule).slice(0, 60);
 }
 
+function formatMoneyMinor(value) {
+  return "₦" + (Number(value || 0) / 100).toLocaleString();
+}
+
+function accessLabel(access) {
+  if (!access) return "Unknown";
+  if (access.source === "owner") return "Owner · Full Pro";
+  if (access.source === "trial") return "Free trial · Full Pro";
+  if (access.source === "referral_bonus") return "Referral hour · Full Pro";
+  if (access.source === "subscription") return access.level === "pro" ? "Pro" : "Basic";
+  return "Expired";
+}
+
 function renderStatus() {
   const s = state.status;
   if (!s) return;
   const bot = s.bot || {};
   const tenant = s.tenant || {};
+  const access = s.access || { allowed:false, level:"locked", source:"expired" };
   const user = state.bootstrap && state.bootstrap.user ? state.bootstrap.user : {};
   const connected = Boolean(s.business_connected);
 
@@ -224,24 +239,135 @@ function renderStatus() {
   $("statusDot").className = "dot " + (connected ? "good" : "bad");
   $("connectionTitle").textContent = connected ? "Bot connected to your Telegram profile" : "Connect the bot to your Telegram profile";
   $("connectionDetail").textContent = connected
-    ? "Only your rules, media, conversations and review alerts are used for this connection."
+    ? "Only your private rules, media, conversations and verification alerts are used for this connection."
     : "Open @Auto_replyerbot, then go to Telegram Settings > Chat Automation and connect it. Premium is not required.";
 
   $("statusUser").textContent = user.username ? "@" + user.username : (user.first_name || "Telegram user");
   $("statusBot").textContent = bot.username ? "@" + bot.username : "Auto Replyer Bot";
   $("statusBusiness").textContent = connected ? "Connected" : "Not connected";
-  $("statusSubscription").textContent = tenant.is_platform_owner ? "Owner" :
-    (tenant.subscription_status === "trial" ? "Free trial" : tenant.subscription_status || "—");
+  $("statusSubscription").textContent = accessLabel(access);
+
+  $("lockedBanner").classList.toggle("hidden", Boolean(access.allowed));
+  $("plansSection").classList.toggle("hidden", Boolean(tenant.is_platform_owner));
 
   if (tenant.is_platform_owner) {
-    $("trialTitle").textContent = "Platform owner";
-    $("trialDetail").textContent = "Your account is not limited by the public trial.";
+    $("trialTitle").textContent = "Owner · Full Pro forever";
+    $("trialDetail").textContent = "Subscription limits never apply to the platform-owner account.";
     $("trialBadge").textContent = "OWNER";
-  } else {
+  } else if (access.source === "trial") {
     const days = tenant.trial_days_left == null ? 0 : tenant.trial_days_left;
-    $("trialTitle").textContent = "30-day free trial";
-    $("trialDetail").textContent = days + " day(s) remaining · planned Starter price ₦1,000/month · billing is not enforced yet.";
+    $("trialTitle").textContent = "30-day full-access trial";
+    $("trialDetail").textContent = days + " day(s) remaining. The trial includes all Pro features.";
     $("trialBadge").textContent = days + " DAYS LEFT";
+  } else if (access.source === "subscription") {
+    $("trialTitle").textContent = access.level === "pro" ? "Pro subscription active" : "Basic subscription active";
+    $("trialDetail").textContent = access.level === "pro"
+      ? "Full automation, flows, media replies and verification are enabled."
+      : "Text/basic auto replies are enabled. Pro-only flows and media features stay saved but inactive.";
+    $("trialBadge").textContent = access.level.toUpperCase();
+  } else if (access.source === "referral_bonus") {
+    $("trialTitle").textContent = "Referral Pro hour active";
+    $("trialDetail").textContent = "Full Pro auto-reply access is temporarily active until " + formatTime(access.expires_at) + ".";
+    $("trialBadge").textContent = "BONUS";
+  } else {
+    $("trialTitle").textContent = "Access expired";
+    $("trialDetail").textContent = "Automatic replies are paused. Your rules and media are still saved.";
+    $("trialBadge").textContent = "PAUSED";
+  }
+
+  const plans = s.plans || [];
+  const basic = plans.find((p) => p.code === "basic");
+  const pro = plans.find((p) => p.code === "pro");
+  if (basic) {
+    const el = $("basicPlanCard");
+    el.classList.toggle("current-plan", access.source === "subscription" && access.level === "basic");
+    const btn = $("basicSubscribeBtn");
+    btn.textContent = basic.stars_price ? (basic.stars_price + " Stars / month") : "Telegram Stars price setup next";
+  }
+  if (pro) {
+    const el = $("proPlanCard");
+    el.classList.toggle("current-plan", access.level === "pro" && access.source === "subscription");
+    const btn = $("proSubscribeBtn");
+    btn.textContent = pro.stars_price ? (pro.stars_price + " Stars / month") : "Telegram Stars price setup next";
+  }
+
+  renderReferral();
+  applyAccessUi();
+}
+
+function renderReferral() {
+  const s = state.status || {};
+  const tenant = s.tenant || {};
+  const referral = s.referral || {};
+  $("referralCard").classList.toggle("hidden", Boolean(tenant.is_platform_owner));
+  if (tenant.is_platform_owner) return;
+
+  $("referralLink").value = referral.link || "";
+  $("qualifiedReferrals").textContent = referral.qualified_referrals || 0;
+  $("totalReferrals").textContent = referral.total_referrals || 0;
+  const readyHours = Math.floor(Number(referral.bonus_seconds_balance || 0) / 3600);
+  $("bonusHoursReady").textContent = readyHours;
+  $("bonusHoursBadge").textContent = readyHours + " HRS";
+
+  const access = s.access || {};
+  const canClaim = !access.allowed && readyHours > 0;
+  $("claimReferralHourBtn").classList.toggle("hidden", !canClaim);
+
+  if (access.source === "referral_bonus") {
+    $("bonusActiveText").textContent = "1-hour Pro pass active until " + formatTime(access.expires_at) + ".";
+  } else if (readyHours > 0 && access.allowed) {
+    $("bonusActiveText").textContent = readyHours + " earned hour(s) saved. You can activate them after normal access expires.";
+  } else if (readyHours > 0) {
+    $("bonusActiveText").textContent = readyHours + " free Pro hour(s) ready.";
+  } else {
+    $("bonusActiveText").textContent = "Invite 2 qualified users to earn your first free Pro hour.";
+  }
+}
+
+function renderOwnerAdmin() {
+  const tenant = state.status && state.status.tenant ? state.status.tenant : {};
+  $("ownerAdminCard").classList.toggle("hidden", !tenant.is_platform_owner);
+  if (!tenant.is_platform_owner || !state.ownerStats) return;
+  $("adminUsers").textContent = state.ownerStats.total_users || 0;
+  $("adminTrials").textContent = state.ownerStats.trial_users || 0;
+  $("adminRefs").textContent = state.ownerStats.qualified_referrals || 0;
+  $("adminBonusHours").textContent = state.ownerStats.referral_bonus_hours_issued || 0;
+}
+
+function clientRuleAllowed(rule, access) {
+  if (!access || !access.allowed) return false;
+  if (access.level === "pro") return true;
+  const basicTriggers = ["new_chat","exact","contains","starts_with","ends_with","default"];
+  return basicTriggers.includes(rule.match_type) &&
+    (rule.reply_type || "text") === "text" &&
+    !rule.media_id && !rule.next_rule_id && !rule.notify_admin;
+}
+
+function applyAccessUi() {
+  const access = state.status && state.status.access ? state.status.access : {allowed:false,level:"locked"};
+  const locked = !access.allowed;
+  $("globalToggle").disabled = locked;
+
+  const form = $("ruleForm");
+  Array.from(form.elements).forEach((el) => {
+    if (el.id === "editingRuleId") return;
+    el.disabled = locked;
+  });
+
+  if (!locked && access.level === "basic") {
+    const proTriggerValues = ["flow_step","photo","video","pdf","document","voice","audio","any_media"];
+    Array.from($("matchType").options).forEach((o) => {
+      o.disabled = proTriggerValues.includes(o.value);
+    });
+    Array.from($("replyType").options).forEach((o) => {
+      o.disabled = o.value !== "text";
+    });
+    $("nextRuleId").disabled = true;
+    $("notifyAdmin").disabled = true;
+    $("mediaId").disabled = true;
+  } else if (!locked) {
+    Array.from($("matchType").options).forEach((o) => o.disabled = false);
+    Array.from($("replyType").options).forEach((o) => o.disabled = false);
   }
 }
 
@@ -279,13 +405,15 @@ function renderRules() {
     const replySummary = (r.reply_type || "text") === "text"
       ? (r.reply_text || "(no text)")
       : ((r.reply_type || "media") + ": " + (media ? media.display_name : "missing media") + (r.reply_text ? " · " + r.reply_text : ""));
-    return '<article class="rule-item ' + (r.enabled ? "" : "rule-off") + '">' +
+    const allowedNow = clientRuleAllowed(r, state.status && state.status.access);
+    return '<article class="rule-item ' + (r.enabled ? "" : "rule-off") + (allowedNow ? '' : ' plan-locked-rule') + '">' +
       '<div class="rule-top"><div>' +
       '<div class="rule-type">' + escapeHtml(labelForRule(r)) + '</div>' +
       '<div class="rule-trigger">' + escapeHtml(triggerDescription(r)) + '</div>' +
       '<div class="rule-reply">' + escapeHtml(replySummary) + '</div>' +
       (next ? '<div class="flow-chip">Next customer message → ' + escapeHtml(ruleName(next)) + '</div>' : '') +
       (r.notify_admin ? '<div class="flow-chip">🔔 Wait for media verification</div>' : '') +
+      (!allowedNow ? '<div class="plan-lock-chip">🔒 Not active on current plan</div>' : '') +
       '<div class="rule-meta"><span>Priority ' + Number(r.priority) + '</span><span>•</span><span>' + (r.enabled ? "Enabled" : "Disabled") + '</span></div>' +
       '</div><div class="rule-actions">' +
       '<button onclick="toggleRule(' + r.id + ',' + (!r.enabled) + ')">' + (r.enabled ? "Disable" : "Enable") + '</button>' +
@@ -344,12 +472,22 @@ async function loadAll() {
   state.logs = results[2].logs || [];
   state.media = results[3].media || [];
   state.reviews = results[4].reviews || [];
+
+  state.ownerStats = null;
+  if (state.status && state.status.tenant && state.status.tenant.is_platform_owner) {
+    try {
+      const owner = await api("owner_stats");
+      state.ownerStats = owner.stats || null;
+    } catch {}
+  }
+
   renderStatus();
   populateSelectors();
   renderRules();
   renderMedia();
   renderReviews();
   renderLogs();
+  renderOwnerAdmin();
 }
 
 function updateFormVisibility() {
@@ -411,7 +549,12 @@ window.toggleRule = async function(id, enabled) {
     await api("rule", { method:"POST", body:{ action:"toggle", id, enabled } });
     toast(enabled ? "Rule enabled" : "Rule disabled");
     await loadAll();
-  } catch (e) { toast("Failed: " + e.message); }
+  } catch (e) {
+    const msg = e.message === "upgrade_to_pro" ? "This rule needs Pro." :
+      e.message === "subscription_required" ? "Your access has expired. Subscribe or use a referral hour." :
+      ("Failed: " + e.message);
+    toast(msg);
+  }
 };
 
 window.deleteRule = async function(id) {
@@ -489,7 +632,11 @@ $("ruleForm").addEventListener("submit", async (e) => {
     resetRuleForm();
     await loadAll();
   } catch (err) {
-    error.textContent = "Could not save rule: " + err.message;
+    const map = {
+      upgrade_to_pro: "This feature requires the Pro plan.",
+      subscription_required: "Your trial/subscription has ended. Subscribe or activate a referral hour first."
+    };
+    error.textContent = map[err.message] || ("Could not save rule: " + err.message);
     error.classList.remove("hidden");
   }
 });
@@ -503,6 +650,35 @@ $("globalToggle").addEventListener("change", async (e) => {
   } catch (err) {
     e.target.checked = !value;
     toast("Could not update: " + err.message);
+  }
+});
+
+$("copyReferralBtn").addEventListener("click", async () => {
+  const link = $("referralLink").value;
+  if (!link) return;
+  try {
+    await navigator.clipboard.writeText(link);
+    toast("Referral link copied");
+  } catch {
+    $("referralLink").select();
+    document.execCommand("copy");
+    toast("Referral link copied");
+  }
+});
+
+$("claimReferralHourBtn").addEventListener("click", async () => {
+  if (!confirm("Activate 1 hour of full Pro auto-reply access now? The hour starts immediately.")) return;
+  try {
+    await api("referral_claim", { method:"POST", body:{} });
+    toast("1-hour Pro pass activated");
+    await loadAll();
+  } catch (err) {
+    const map = {
+      normal_access_still_active: "Save the bonus hour until your normal access expires.",
+      bonus_already_active: "A referral hour is already active.",
+      not_enough_referral_bonus: "You need 2 qualified referrals for each free hour."
+    };
+    toast(map[err.message] || ("Could not activate: " + err.message));
   }
 });
 
