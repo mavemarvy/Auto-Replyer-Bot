@@ -1,7 +1,23 @@
 const ENDPOINT = "https://iqdttxdowvdxszxbiwua.supabase.co/functions/v1/telegram-auto-reply";
-const SESSION_KEY = "arb_admin_secret";
+const SESSION_KEY = "arb_public_session";
 const $ = (id) => document.getElementById(id);
-const state = { secret: sessionStorage.getItem(SESSION_KEY) || "", rules: [], media: [], reviews: [], logs: [], status: null };
+
+const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+if (tg) {
+  try { tg.ready(); tg.expand(); } catch {}
+}
+
+const state = {
+  initData: tg && tg.initData ? tg.initData : "",
+  session: sessionStorage.getItem(SESSION_KEY) || "",
+  bootstrap: null,
+  status: null,
+  rules: [],
+  media: [],
+  reviews: [],
+  logs: [],
+  authMode: "login"
+};
 
 function toast(message) {
   const el = $("toast");
@@ -11,11 +27,40 @@ function toast(message) {
   window.__toastTimer = setTimeout(() => el.classList.add("hidden"), 2800);
 }
 
-async function api(admin, options = {}) {
+function escapeHtml(value) {
+  return String(value == null ? "" : value)
+    .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;").replaceAll("'", "&#039;");
+}
+
+function formatTime(value) {
+  if (!value) return "—";
+  try { return new Date(value).toLocaleString(); } catch { return String(value); }
+}
+
+async function rawPublic(action, body) {
+  const res = await fetch(ENDPOINT + "?public=" + encodeURIComponent(action), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body || {})
+  });
+  const data = await res.json().catch(() => ({ ok: false, error: "invalid_response" }));
+  if (!res.ok || !data.ok) {
+    const err = new Error(data.error || ("HTTP " + res.status));
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+}
+
+async function api(action, options = {}) {
   const method = options.method || "GET";
-  const res = await fetch(ENDPOINT + "?admin=" + encodeURIComponent(admin), {
+  const res = await fetch(ENDPOINT + "?public=" + encodeURIComponent(action), {
     method,
-    headers: { "Content-Type": "application/json", "x-admin-secret": state.secret },
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer " + state.session
+    },
     body: options.body ? JSON.stringify(options.body) : undefined
   });
   const data = await res.json().catch(() => ({ ok: false, error: "invalid_response" }));
@@ -27,19 +72,111 @@ async function api(admin, options = {}) {
   return data;
 }
 
-function escapeHtml(value) {
-  return String(value == null ? "" : value)
-    .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;").replaceAll("'", "&#039;");
+function setAuthenticated(authenticated) {
+  $("authView").classList.toggle("hidden", authenticated);
+  $("dashboardView").classList.toggle("hidden", !authenticated);
 }
-function formatTime(value) {
-  if (!value) return "—";
-  try { return new Date(value).toLocaleString(); } catch { return String(value); }
+
+function showOutsideTelegram() {
+  $("authSubtitle").textContent = "Open the Mini App from Telegram to identify your account securely.";
+  $("outsideTelegram").classList.remove("hidden");
+  $("pinForm").classList.add("hidden");
 }
-function setUnlocked(unlocked) {
-  $("unlockView").classList.toggle("hidden", unlocked);
-  $("dashboardView").classList.toggle("hidden", !unlocked);
+
+function showPinForm(bootstrap) {
+  $("outsideTelegram").classList.add("hidden");
+  $("pinForm").classList.remove("hidden");
+  const u = bootstrap.user || {};
+  $("telegramUserCard").innerHTML =
+    '<div class="user-avatar">' + escapeHtml((u.first_name || "T").slice(0,1).toUpperCase()) + '</div>' +
+    '<div><strong>' + escapeHtml(u.first_name || "Telegram User") + '</strong>' +
+    (u.username ? '<div class="muted small">@' + escapeHtml(u.username) + '</div>' : '') + '</div>';
+
+  if (bootstrap.needs_pin) {
+    state.authMode = "create";
+    $("authSubtitle").textContent = "Create a private PIN for your personal auto-reply dashboard.";
+    $("pinLabel").textContent = "Create PIN";
+    $("confirmPinWrap").classList.remove("hidden");
+    $("pinSubmit").textContent = "Create PIN & continue";
+  } else {
+    state.authMode = "login";
+    $("authSubtitle").textContent = "Enter your PIN to open your private dashboard.";
+    $("pinLabel").textContent = "Your PIN";
+    $("confirmPinWrap").classList.add("hidden");
+    $("pinSubmit").textContent = "Unlock my dashboard";
+  }
+
+  const t = bootstrap.tenant || {};
+  if (t.is_platform_owner) {
+    $("trialPreview").textContent = "Platform owner account.";
+  } else {
+    $("trialPreview").textContent =
+      "Your 30-day free trial has " + (t.trial_days_left == null ? "30" : t.trial_days_left) + " day(s) remaining.";
+  }
 }
+
+async function bootstrapAuth() {
+  if (!state.initData) {
+    showOutsideTelegram();
+    return;
+  }
+  try {
+    const data = await rawPublic("bootstrap", { initData: state.initData });
+    state.bootstrap = data;
+    showPinForm(data);
+    if (state.session) {
+      try {
+        await loadAll();
+        setAuthenticated(true);
+      } catch {
+        state.session = "";
+        sessionStorage.removeItem(SESSION_KEY);
+      }
+    }
+  } catch (e) {
+    $("authSubtitle").textContent = "Telegram authentication could not be verified. Close and reopen the Mini App from @Auto_replyerbot.";
+    $("outsideTelegram").classList.remove("hidden");
+  }
+}
+
+$("pinForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const pin = $("pinInput").value.trim();
+  const confirmPin = $("confirmPinInput").value.trim();
+  const error = $("pinError");
+  error.classList.add("hidden");
+
+  if (!/^\d{6,12}$/.test(pin)) {
+    error.textContent = "Use a 6–12 digit PIN.";
+    error.classList.remove("hidden");
+    return;
+  }
+  if (state.authMode === "create" && pin !== confirmPin) {
+    error.textContent = "The two PINs do not match.";
+    error.classList.remove("hidden");
+    return;
+  }
+
+  try {
+    const action = state.authMode === "create" ? "set_pin" : "login";
+    const data = await rawPublic(action, { initData: state.initData, pin });
+    state.session = data.token;
+    sessionStorage.setItem(SESSION_KEY, data.token);
+    $("pinInput").value = "";
+    $("confirmPinInput").value = "";
+    await loadAll();
+    setAuthenticated(true);
+  } catch (err) {
+    const map = {
+      invalid_pin: "Incorrect PIN.",
+      pin_must_be_6_to_12_digits: "Use a 6–12 digit PIN.",
+      telegram_auth_required: "Telegram could not verify this session. Reopen the Mini App.",
+      pin_already_set: "A PIN already exists. Close and reopen the dashboard, then enter it."
+    };
+    error.textContent = map[err.message] || ("Could not continue: " + err.message);
+    error.classList.remove("hidden");
+  }
+});
 
 function labelForRule(rule) {
   const map = {
@@ -50,6 +187,7 @@ function labelForRule(rule) {
   };
   return map[rule.match_type] || rule.match_type;
 }
+
 function triggerDescription(rule) {
   if (rule.match_type === "new_chat") return "First message from a new person";
   if (rule.match_type === "default") return "When no earlier rule matches";
@@ -57,6 +195,7 @@ function triggerDescription(rule) {
   if (["photo","video","pdf","document","voice","audio","any_media"].includes(rule.match_type)) return labelForRule(rule);
   return rule.trigger_text || "(empty)";
 }
+
 function ruleName(rule) {
   return "#" + rule.id + " · " + labelForRule(rule) + " · " + triggerDescription(rule).slice(0, 60);
 }
@@ -65,9 +204,14 @@ function renderStatus() {
   const s = state.status;
   if (!s) return;
   const bot = s.bot || {};
-  const webhook = s.webhook || {};
-  const registered = Boolean(webhook.url);
-  $("botIdentity").textContent = bot.username ? ("@" + bot.username) : (bot.first_name || "Telegram bot");
+  const tenant = s.tenant || {};
+  const user = state.bootstrap && state.bootstrap.user ? state.bootstrap.user : {};
+  const connected = Boolean(s.business_connected);
+
+  $("botIdentity").textContent =
+    (user.first_name ? user.first_name + " · " : "") +
+    (bot.username ? "@" + bot.username : "Auto Replyer Bot");
+
   $("statRules").textContent = s.stats && s.stats.rules != null ? s.stats.rules : 0;
   $("statSeen").textContent = s.stats && s.stats.seen_chats != null ? s.stats.seen_chats : 0;
   $("statReplies").textContent = s.stats && s.stats.replies != null ? s.stats.replies : 0;
@@ -75,15 +219,29 @@ function renderStatus() {
   $("statReviews").textContent = s.stats && s.stats.pending_reviews != null ? s.stats.pending_reviews : 0;
   $("globalToggle").checked = Boolean(s.auto_reply_enabled);
   $("autoReplyText").textContent = s.auto_reply_enabled ? "ON" : "OFF";
-  $("statusBot").textContent = bot.username ? ("@" + bot.username) : (bot.first_name || "Unknown");
-  $("statusBusiness").textContent = bot.can_connect_to_business ? "Yes" : "No";
-  $("statusWebhook").textContent = registered ? "Registered" : "Not registered";
-  $("statusPending").textContent = webhook.pending_update_count || 0;
-  $("statusError").textContent = webhook.last_error_message || "None";
-  $("statusDot").className = "dot " + (registered ? "good" : "bad");
-  $("connectionTitle").textContent = registered ? "Telegram webhook connected" : "Webhook not registered";
-  $("connectionDetail").textContent = registered ? "Text, media, uploads and review actions are connected." : "Register the webhook.";
-  $("registerWebhookBtn").textContent = registered ? "Re-register webhook" : "Register webhook";
+
+  $("statusDot").className = "dot " + (connected ? "good" : "bad");
+  $("connectionTitle").textContent = connected ? "Bot connected to your Telegram profile" : "Connect the bot to your Telegram profile";
+  $("connectionDetail").textContent = connected
+    ? "Only your rules, media, conversations and review alerts are used for this connection."
+    : "Open @Auto_replyerbot, then connect it in Telegram’s profile/business chatbot settings. Premium is not required.";
+
+  $("statusUser").textContent = user.username ? "@" + user.username : (user.first_name || "Telegram user");
+  $("statusBot").textContent = bot.username ? "@" + bot.username : "Auto Replyer Bot";
+  $("statusBusiness").textContent = connected ? "Connected" : "Not connected";
+  $("statusSubscription").textContent = tenant.is_platform_owner ? "Owner" :
+    (tenant.subscription_status === "trial" ? "Free trial" : tenant.subscription_status || "—");
+
+  if (tenant.is_platform_owner) {
+    $("trialTitle").textContent = "Platform owner";
+    $("trialDetail").textContent = "Your account is not limited by the public trial.";
+    $("trialBadge").textContent = "OWNER";
+  } else {
+    const days = tenant.trial_days_left == null ? 0 : tenant.trial_days_left;
+    $("trialTitle").textContent = "30-day free trial";
+    $("trialDetail").textContent = days + " day(s) remaining · planned Starter price ₦1,000/month · billing is not enforced yet.";
+    $("trialBadge").textContent = days + " DAYS LEFT";
+  }
 }
 
 function populateSelectors() {
@@ -108,11 +266,12 @@ function renderRules() {
   $("ruleCountBadge").textContent = state.rules.length;
   const list = $("rulesList");
   if (!state.rules.length) {
-    list.innerHTML = '<div class="empty">No rules yet.</div>';
+    list.innerHTML = '<div class="empty">No rules yet. Add your first private rule above.</div>';
     return;
   }
   const byId = new Map(state.rules.map((r) => [Number(r.id), r]));
   const mediaById = new Map(state.media.map((m) => [String(m.id), m]));
+
   list.innerHTML = state.rules.map((r) => {
     const next = r.next_rule_id ? byId.get(Number(r.next_rule_id)) : null;
     const media = r.media_id ? mediaById.get(String(r.media_id)) : null;
@@ -125,7 +284,7 @@ function renderRules() {
       '<div class="rule-trigger">' + escapeHtml(triggerDescription(r)) + '</div>' +
       '<div class="rule-reply">' + escapeHtml(replySummary) + '</div>' +
       (next ? '<div class="flow-chip">Next customer message → ' + escapeHtml(ruleName(next)) + '</div>' : '') +
-      (r.notify_admin ? '<div class="flow-chip">🔔 Media review notification enabled</div>' : '') +
+      (r.notify_admin ? '<div class="flow-chip">🔔 Wait for media verification</div>' : '') +
       '<div class="rule-meta"><span>Priority ' + Number(r.priority) + '</span><span>•</span><span>' + (r.enabled ? "Enabled" : "Disabled") + '</span></div>' +
       '</div><div class="rule-actions">' +
       '<button onclick="toggleRule(' + r.id + ',' + (!r.enabled) + ')">' + (r.enabled ? "Disable" : "Enable") + '</button>' +
@@ -139,7 +298,7 @@ function renderMedia() {
   $("mediaCountBadge").textContent = state.media.length;
   const list = $("mediaList");
   if (!state.media.length) {
-    list.innerHTML = '<div class="empty">No saved media yet. Upload one in @Auto_replyerbot.</div>';
+    list.innerHTML = '<div class="empty">No saved media yet. Send media to @Auto_replyerbot, then use /upload Name.</div>';
     return;
   }
   list.innerHTML = state.media.map((m) =>
@@ -176,7 +335,9 @@ function renderLogs() {
 }
 
 async function loadAll() {
-  const results = await Promise.all([api("status"), api("rules"), api("logs"), api("media"), api("reviews")]);
+  const results = await Promise.all([
+    api("status"), api("rules"), api("logs"), api("media"), api("reviews")
+  ]);
   state.status = results[0];
   state.rules = results[1].rules || [];
   state.logs = results[2].logs || [];
@@ -246,7 +407,7 @@ window.editRule = function(id) {
 
 window.toggleRule = async function(id, enabled) {
   try {
-    await api("rule", { method: "POST", body: { action: "toggle", id, enabled } });
+    await api("rule", { method:"POST", body:{ action:"toggle", id, enabled } });
     toast(enabled ? "Rule enabled" : "Rule disabled");
     await loadAll();
   } catch (e) { toast("Failed: " + e.message); }
@@ -255,44 +416,25 @@ window.toggleRule = async function(id, enabled) {
 window.deleteRule = async function(id) {
   if (!confirm("Delete this rule?")) return;
   try {
-    await api("rule", { method: "POST", body: { action: "delete", id } });
+    await api("rule", { method:"POST", body:{ action:"delete", id } });
     toast("Rule deleted");
     resetRuleForm();
     await loadAll();
   } catch (e) { toast("Failed: " + e.message); }
 };
 
-$("showSecret").addEventListener("click", () => {
-  const i = $("adminSecret");
-  i.type = i.type === "password" ? "text" : "password";
-  $("showSecret").textContent = i.type === "password" ? "Show" : "Hide";
-});
-
-$("unlockForm").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  state.secret = $("adminSecret").value.trim();
-  $("unlockError").classList.add("hidden");
-  try {
-    await loadAll();
-    sessionStorage.setItem(SESSION_KEY, state.secret);
-    setUnlocked(true);
-  } catch (err) {
-    state.secret = "";
-    sessionStorage.removeItem(SESSION_KEY);
-    $("unlockError").textContent = err.status === 401 ? "That secret is not correct." : ("Could not connect: " + err.message);
-    $("unlockError").classList.remove("hidden");
-  }
+$("refreshBtn").addEventListener("click", async () => {
+  try { await loadAll(); toast("Dashboard refreshed"); }
+  catch (e) { toast("Refresh failed: " + e.message); }
 });
 
 $("logoutBtn").addEventListener("click", () => {
-  state.secret = "";
+  state.session = "";
   sessionStorage.removeItem(SESSION_KEY);
-  $("adminSecret").value = "";
-  setUnlocked(false);
+  setAuthenticated(false);
+  showPinForm(state.bootstrap);
 });
-$("refreshBtn").addEventListener("click", async () => {
-  try { await loadAll(); toast("Dashboard refreshed"); } catch (e) { toast("Refresh failed: " + e.message); }
-});
+
 $("matchType").addEventListener("change", updateFormVisibility);
 $("replyType").addEventListener("change", () => { populateSelectors(); updateFormVisibility(); });
 $("notifyAdmin").addEventListener("change", updateFormVisibility);
@@ -308,6 +450,7 @@ $("ruleForm").addEventListener("submit", async (e) => {
   const replyText = $("replyText").value.trim();
   const error = $("ruleFormError");
   error.classList.add("hidden");
+
   const noTrigger = ["new_chat","default","photo","video","pdf","document","voice","audio","any_media","flow_step"].includes(matchType);
   if (!noTrigger && !triggerText) {
     error.textContent = "Enter the incoming message or keyword.";
@@ -315,31 +458,31 @@ $("ruleForm").addEventListener("submit", async (e) => {
     return;
   }
   if (replyType === "text" && !replyText && !$("notifyAdmin").checked) {
-    error.textContent = "Enter a text reply, or enable a review notification.";
+    error.textContent = "Enter a text reply, or enable media verification.";
     error.classList.remove("hidden");
     return;
   }
   if (replyType !== "text" && !mediaId) {
-    error.textContent = "Choose a saved media item.";
+    error.textContent = "Choose one of your saved media items.";
     error.classList.remove("hidden");
     return;
   }
 
   try {
-    await api("rule", { method: "POST", body: {
-      action: id ? "update" : "create",
-      id: id ? Number(id) : undefined,
-      match_type: matchType,
-      trigger_text: triggerText,
-      reply_type: replyType,
-      media_id: mediaId,
-      reply_text: replyText,
-      priority: Number($("priority").value || 100),
-      next_rule_id: $("nextRuleId").value ? Number($("nextRuleId").value) : null,
-      notify_admin: $("notifyAdmin").checked,
-      approval_reply_text: $("approvalReplyText").value.trim(),
-      rejection_reply_text: $("rejectionReplyText").value.trim(),
-      enabled: $("ruleEnabled").checked
+    await api("rule", { method:"POST", body:{
+      action:id ? "update" : "create",
+      id:id ? Number(id) : undefined,
+      match_type:matchType,
+      trigger_text:triggerText,
+      reply_type:replyType,
+      media_id:mediaId,
+      reply_text:replyText,
+      priority:Number($("priority").value || 100),
+      next_rule_id:$("nextRuleId").value ? Number($("nextRuleId").value) : null,
+      notify_admin:$("notifyAdmin").checked,
+      approval_reply_text:$("approvalReplyText").value.trim(),
+      rejection_reply_text:$("rejectionReplyText").value.trim(),
+      enabled:$("ruleEnabled").checked
     }});
     toast(id ? "Rule updated" : "Rule added");
     resetRuleForm();
@@ -353,7 +496,7 @@ $("ruleForm").addEventListener("submit", async (e) => {
 $("globalToggle").addEventListener("change", async (e) => {
   const value = e.target.checked;
   try {
-    await api("setting", { method: "POST", body: { key: "auto_reply_enabled", value } });
+    await api("setting", { method:"POST", body:{ key:"auto_reply_enabled", value } });
     toast(value ? "Auto replies turned on" : "Auto replies paused");
     await loadAll();
   } catch (err) {
@@ -362,25 +505,10 @@ $("globalToggle").addEventListener("change", async (e) => {
   }
 });
 
-$("registerWebhookBtn").addEventListener("click", async () => {
-  try {
-    $("registerWebhookBtn").disabled = true;
-    $("registerWebhookBtn").textContent = "Registering…";
-    await api("register", { method: "POST", body: {} });
-    toast("Telegram webhook registered");
-    await loadAll();
-  } catch (err) {
-    toast("Registration failed: " + err.message);
-  } finally {
-    $("registerWebhookBtn").disabled = false;
-    renderStatus();
-  }
-});
-
 $("resetSeenBtn").addEventListener("click", async () => {
-  if (!confirm("Reset all new-messenger memory?")) return;
+  if (!confirm("Reset your new-messenger memory?")) return;
   try {
-    await api("reset_seen", { method: "POST", body: {} });
+    await api("reset_seen", { method:"POST", body:{} });
     toast("New-chat memory reset");
     await loadAll();
   } catch (err) { toast("Reset failed: " + err.message); }
@@ -388,7 +516,6 @@ $("resetSeenBtn").addEventListener("click", async () => {
 
 (async function init() {
   updateFormVisibility();
-  if (!state.secret) { setUnlocked(false); return; }
-  try { await loadAll(); setUnlocked(true); }
-  catch { sessionStorage.removeItem(SESSION_KEY); state.secret = ""; setUnlocked(false); }
+  setAuthenticated(false);
+  await bootstrapAuth();
 })();
