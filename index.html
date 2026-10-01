@@ -5,34 +5,47 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="theme-color" content="#090909" />
   <title>Auto Replyer Bot</title>
+  <script src="https://telegram.org/js/telegram-web-app.js?63"></script>
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
   <div class="bg-orb orb-a"></div>
   <div class="bg-orb orb-b"></div>
+
   <main class="shell">
-    <section id="unlockView" class="unlock-wrap">
+    <section id="authView" class="unlock-wrap">
       <div class="brand-mark">AR</div>
+      <div class="eyebrow">PUBLIC TELEGRAM AUTO REPLY</div>
       <h1>Auto Replyer Bot</h1>
-      <p class="muted">Secure control panel for your Telegram Business auto replies.</p>
-      <form id="unlockForm" class="card unlock-card">
-        <label for="adminSecret">Dashboard secret</label>
-        <div class="secret-row">
-          <input id="adminSecret" type="password" autocomplete="current-password" placeholder="Enter your saved secret" required />
-          <button id="showSecret" type="button" class="icon-btn">Show</button>
-        </div>
-        <button class="primary full" type="submit">Unlock dashboard</button>
-        <p id="unlockError" class="error hidden"></p>
-        <p class="tiny">Stored only in this browser session.</p>
+      <p id="authSubtitle" class="muted">Checking your Telegram identity…</p>
+
+      <div id="outsideTelegram" class="card unlock-card hidden">
+        <h2>Open this dashboard inside Telegram</h2>
+        <p class="muted auth-copy">For security, public accounts are identified by Telegram before a PIN can unlock the dashboard.</p>
+        <a class="primary full link-button" href="https://t.me/Auto_replyerbot">Open @Auto_replyerbot</a>
+        <p class="tiny">Start the bot, then tap <b>Open My Dashboard</b> or the bot’s Open App button.</p>
+      </div>
+
+      <form id="pinForm" class="card unlock-card hidden">
+        <div id="telegramUserCard" class="telegram-user"></div>
+        <label for="pinInput"><span id="pinLabel">Your PIN</span>
+          <input id="pinInput" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="12" placeholder="6–12 digit PIN" autocomplete="one-time-code" required />
+        </label>
+        <label id="confirmPinWrap" class="hidden" for="confirmPinInput"><span>Confirm PIN</span>
+          <input id="confirmPinInput" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="12" placeholder="Repeat your PIN" autocomplete="one-time-code" />
+        </label>
+        <button id="pinSubmit" class="primary full" type="submit">Unlock dashboard</button>
+        <p id="pinError" class="error hidden"></p>
+        <p id="trialPreview" class="tiny"></p>
       </form>
     </section>
 
     <section id="dashboardView" class="hidden">
       <header class="topbar">
         <div>
-          <div class="eyebrow">PERSONAL PRO V2</div>
+          <div class="eyebrow">MY AUTO REPLY DASHBOARD</div>
           <h1>Auto Replyer Bot</h1>
-          <p id="botIdentity" class="muted">Loading bot status…</p>
+          <p id="botIdentity" class="muted">Loading…</p>
         </div>
         <div class="top-actions">
           <button id="refreshBtn" class="ghost">Refresh</button>
@@ -40,7 +53,7 @@
         </div>
       </header>
 
-      <section class="status-strip card">
+      <section id="connectionBanner" class="status-strip card">
         <div class="status-left">
           <span id="statusDot" class="dot pending"></span>
           <div>
@@ -48,7 +61,16 @@
             <p id="connectionDetail" class="muted compact">Please wait.</p>
           </div>
         </div>
-        <button id="registerWebhookBtn" class="secondary">Register webhook</button>
+        <a id="openBotBtn" class="secondary link-button" href="https://t.me/Auto_replyerbot">Open bot</a>
+      </section>
+
+      <section id="trialBanner" class="card trial-banner">
+        <div>
+          <div class="eyebrow">PLAN</div>
+          <strong id="trialTitle">30-day free trial</strong>
+          <p id="trialDetail" class="muted compact">Payments are not enforced yet.</p>
+        </div>
+        <span id="trialBadge" class="badge">FREE TRIAL</span>
       </section>
 
       <section class="stats-grid pro-stats">
@@ -74,8 +96,7 @@
             <form id="ruleForm" class="rule-form">
               <input id="editingRuleId" type="hidden" />
               <div class="field-grid">
-                <label>
-                  <span>Trigger</span>
+                <label><span>Trigger</span>
                   <select id="matchType">
                     <optgroup label="Text">
                       <option value="exact">Exact message</option>
@@ -99,22 +120,19 @@
                     </optgroup>
                   </select>
                 </label>
-                <label>
-                  <span>Priority <small class="field-note">(lower runs first)</small></span>
+                <label><span>Priority <small class="field-note">(lower runs first)</small></span>
                   <input id="priority" type="number" value="100" min="0" step="1" />
                 </label>
               </div>
 
-              <label id="triggerWrap">
-                <span>Incoming message / keyword</span>
+              <label id="triggerWrap"><span>Incoming message / keyword</span>
                 <input id="triggerText" type="text" placeholder="e.g. price" />
               </label>
 
               <div class="divider"></div>
 
               <div class="field-grid">
-                <label>
-                  <span>Reply type</span>
+                <label><span>Reply type</span>
                   <select id="replyType">
                     <option value="text">Text message</option>
                     <option value="voice">Telegram voice note</option>
@@ -124,34 +142,31 @@
                     <option value="document">Document</option>
                   </select>
                 </label>
-                <label id="mediaWrap" class="hidden">
-                  <span>Saved media</span>
+                <label id="mediaWrap" class="hidden"><span>Saved media</span>
                   <select id="mediaId"><option value="">Choose saved media…</option></select>
                 </label>
               </div>
 
-              <label>
-                <span id="replyTextLabel">Automatic reply</span>
+              <label><span id="replyTextLabel">Automatic reply</span>
                 <textarea id="replyText" rows="5" placeholder="Type the reply Telegram should send…"></textarea>
                 <small id="replyTextHint" class="field-note">For media replies, this becomes the optional caption.</small>
               </label>
 
               <div class="divider"></div>
 
-              <label>
-                <span>After this reply, wait for the customer's next message and send</span>
+              <label><span>After this reply, wait for the customer's next message and send</span>
                 <select id="nextRuleId"><option value="">End flow — do nothing automatically</option></select>
-                <small class="field-note">Choose another rule. Flow-step rules are ideal here because they do not trigger by themselves.</small>
+                <small class="field-note">Choose another rule. Flow-step rules only run when another rule points to them.</small>
               </label>
 
               <label class="check-row">
                 <input id="notifyAdmin" type="checkbox" />
-                <span>When this rule matches media, send it to my bot chat for review</span>
+                <span>Wait for the customer’s next media and send it to my bot chat for review</span>
               </label>
 
               <div id="reviewOptions" class="review-options hidden">
-                <label><span>Message to customer after I tap Approve</span><textarea id="approvalReplyText" rows="3" placeholder="Optional approval message"></textarea></label>
-                <label><span>Message to customer after I tap Reject</span><textarea id="rejectionReplyText" rows="3" placeholder="Optional rejection message"></textarea></label>
+                <label><span>Message after Approve</span><textarea id="approvalReplyText" rows="3" placeholder="Optional approval message"></textarea></label>
+                <label><span>Message after Reject</span><textarea id="rejectionReplyText" rows="3" placeholder="Optional rejection message"></textarea></label>
               </div>
 
               <label class="check-row"><input id="ruleEnabled" type="checkbox" checked /><span>Enable this rule immediately</span></label>
@@ -162,7 +177,7 @@
 
           <section class="card section-card">
             <div class="section-head">
-              <div><div class="eyebrow">ACTIVE CONFIGURATION</div><h2>Your rules & flow steps</h2></div>
+              <div><div class="eyebrow">MY CONFIGURATION</div><h2>Rules & flow steps</h2></div>
               <span id="ruleCountBadge" class="badge">0</span>
             </div>
             <div id="rulesList" class="rules-list"><div class="empty">Loading rules…</div></div>
@@ -171,29 +186,27 @@
 
         <aside class="right-col">
           <section class="card section-card">
-            <div class="section-head"><div><div class="eyebrow">MEDIA LIBRARY</div><h2>Voice, audio & files</h2></div><span id="mediaCountBadge" class="badge">0</span></div>
+            <div class="section-head"><div><div class="eyebrow">MY MEDIA LIBRARY</div><h2>Voice, audio & files</h2></div><span id="mediaCountBadge" class="badge">0</span></div>
             <div class="help-box">
-              <strong>Upload from Telegram</strong>
-              <p>Open <b>@Auto_replyerbot</b>, send or forward a voice note, photo, video, audio or document, then send:</p>
+              <strong>Upload through @Auto_replyerbot</strong>
+              <p>Send or forward a voice note, photo, video, audio or document to the bot, then send:</p>
               <code>/upload Media Name</code>
-              <p>Example: <code>/upload Coach Keshy Introduction</code></p>
             </div>
             <div id="mediaList" class="media-list"><div class="empty">No saved media yet.</div></div>
           </section>
 
           <section class="card section-card">
-            <div class="section-head"><div><div class="eyebrow">VERIFICATION INBOX</div><h2>Recent media reviews</h2></div></div>
+            <div class="section-head"><div><div class="eyebrow">MY VERIFICATION INBOX</div><h2>Recent media reviews</h2></div></div>
             <div id="reviewsList" class="logs-list"><div class="empty">No reviews yet.</div></div>
           </section>
 
           <section class="card section-card">
-            <div class="section-head"><div><div class="eyebrow">BOT STATUS</div><h2>Connection</h2></div></div>
+            <div class="section-head"><div><div class="eyebrow">ACCOUNT</div><h2>Connection status</h2></div></div>
             <dl class="status-list">
+              <div><dt>Telegram account</dt><dd id="statusUser">—</dd></div>
               <div><dt>Bot</dt><dd id="statusBot">—</dd></div>
-              <div><dt>Business capable</dt><dd id="statusBusiness">—</dd></div>
-              <div><dt>Webhook</dt><dd id="statusWebhook">—</dd></div>
-              <div><dt>Pending updates</dt><dd id="statusPending">—</dd></div>
-              <div><dt>Last webhook error</dt><dd id="statusError">None</dd></div>
+              <div><dt>Profile connected</dt><dd id="statusBusiness">—</dd></div>
+              <div><dt>Subscription</dt><dd id="statusSubscription">—</dd></div>
             </dl>
           </section>
 
@@ -208,9 +221,11 @@
           </section>
         </aside>
       </section>
-      <footer>Auto Replyer Bot Personal Pro v2 · Telegram Business + Supabase</footer>
+
+      <footer>Auto Replyer Bot · Private tenant dashboard · Telegram Business automation</footer>
     </section>
   </main>
+
   <div id="toast" class="toast hidden"></div>
   <script src="/app.js"></script>
 </body>
