@@ -140,3 +140,14 @@ footer{text-align:center;color:#505050;font-size:11px;padding:26px 0 0}
 .review-status.approved{background:#102419;color:#7ce3a8}
 .review-status.rejected{background:#2b1515;color:#ff9d9d}
 @media(max-width:860px){.pro-stats{grid-template-columns:repeat(2,1fr)}}
+
+.link-button{display:inline-flex;align-items:center;justify-content:center;text-decoration:none}
+.auth-copy{line-height:1.55;margin:10px 0 0}
+.telegram-user{display:flex;align-items:center;gap:12px;padding:12px;border:1px solid #282828;border-radius:14px;background:#0d0d0d;margin-bottom:16px}
+.user-avatar{width:42px;height:42px;border-radius:50%;display:grid;place-items:center;background:#1c3326;border:1px solid #2e6c49;color:#80e5ae;font-weight:900}
+.trial-banner{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:16px 18px;margin-bottom:14px}
+#outsideTelegram h2{margin-bottom:8px}
+@media(max-width:560px){
+  .trial-banner{align-items:flex-start}
+  .trial-banner .badge{white-space:nowrap}
+}
