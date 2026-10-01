@@ -171,7 +171,8 @@ $("pinForm").addEventListener("submit", async (e) => {
       invalid_pin: "Incorrect PIN.",
       pin_must_be_6_to_12_digits: "Use a 6–12 digit PIN.",
       telegram_auth_required: "Telegram could not verify this session. Reopen the Mini App.",
-      pin_already_set: "A PIN already exists. Close and reopen the dashboard, then enter it."
+      pin_already_set: "A PIN already exists. Close and reopen the dashboard, then enter it.",
+      pin_locked: "Too many incorrect attempts. PIN login is temporarily locked for 15 minutes."
     };
     error.textContent = map[err.message] || ("Could not continue: " + err.message);
     error.classList.remove("hidden");
@@ -224,7 +225,7 @@ function renderStatus() {
   $("connectionTitle").textContent = connected ? "Bot connected to your Telegram profile" : "Connect the bot to your Telegram profile";
   $("connectionDetail").textContent = connected
     ? "Only your rules, media, conversations and review alerts are used for this connection."
-    : "Open @Auto_replyerbot, then connect it in Telegram’s profile/business chatbot settings. Premium is not required.";
+    : "Open @Auto_replyerbot, then go to Telegram Settings > Chat Automation and connect it. Premium is not required.";
 
   $("statusUser").textContent = user.username ? "@" + user.username : (user.first_name || "Telegram user");
   $("statusBot").textContent = bot.username ? "@" + bot.username : "Auto Replyer Bot";
