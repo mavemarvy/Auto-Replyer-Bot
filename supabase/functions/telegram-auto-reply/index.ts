@@ -212,6 +212,21 @@ async function armNextStep(rule: any, connectionId: string, chatId: number, supa
   if (error) throw error;
 }
 
+async function armMediaReviewExpectation(rule: any, connectionId: string, chatId: number, supabase: any) {
+  if (!rule?.notify_admin) return;
+  const expires = new Date(Date.now() + 24 * 3600_000).toISOString();
+  const { error } = await supabase
+    .from("telegram_review_expectations")
+    .upsert({
+      business_connection_id: connectionId,
+      chat_id: chatId,
+      source_rule_id: rule.id,
+      expires_at: expires,
+      created_at: new Date().toISOString(),
+    });
+  if (error) throw error;
+}
+
 async function notifyAdminForReview(
   rule: any,
   message: any,
@@ -292,7 +307,14 @@ async function executeRule(
 ) {
   const result = await sendRuleReply(rule, connectionId, message.chat.id, supabase, botToken);
   await armNextStep(rule, connectionId, message.chat.id, supabase);
-  await notifyAdminForReview(rule, message, media, connectionId, supabase, botToken);
+
+  if (rule?.notify_admin) {
+    if (media) {
+      await notifyAdminForReview(rule, message, media, connectionId, supabase, botToken);
+    } else {
+      await armMediaReviewExpectation(rule, connectionId, message.chat.id, supabase);
+    }
+  }
 
   await supabase.from("telegram_reply_logs").insert({
     business_connection_id: connectionId,
@@ -738,6 +760,60 @@ Deno.serve(async (req: Request) => {
     const incomingText = String(message.text ?? message.caption ?? "").trim();
     const normalized = normalizeMessageText(incomingText);
     const media = getIncomingMedia(message);
+
+    if (media) {
+      const { data: expectation, error: expectationError } = await supabase
+        .from("telegram_review_expectations")
+        .select("*")
+        .eq("business_connection_id", connectionId)
+        .eq("chat_id", chatId)
+        .maybeSingle();
+      if (expectationError) throw expectationError;
+
+      if (expectation) {
+        const expired = new Date(expectation.expires_at).getTime() < Date.now();
+
+        if (expired) {
+          await supabase
+            .from("telegram_review_expectations")
+            .delete()
+            .eq("business_connection_id", connectionId)
+            .eq("chat_id", chatId);
+        } else {
+          const { data: reviewRule, error: reviewRuleError } = await supabase
+            .from("telegram_auto_reply_rules")
+            .select("*")
+            .eq("id", expectation.source_rule_id)
+            .eq("enabled", true)
+            .maybeSingle();
+          if (reviewRuleError) throw reviewRuleError;
+
+          if (reviewRule?.notify_admin) {
+            await notifyAdminForReview(reviewRule, message, media, connectionId, supabase, botToken);
+
+            await supabase
+              .from("telegram_review_expectations")
+              .delete()
+              .eq("business_connection_id", connectionId)
+              .eq("chat_id", chatId);
+
+            await supabase.from("telegram_reply_logs").insert({
+              business_connection_id: connectionId,
+              chat_id: chatId,
+              telegram_message_id: message.message_id ?? null,
+              incoming_text: `[${media.type} submitted for review]`,
+              matched_rule_id: reviewRule.id,
+              reply_text: null,
+              reply_type: "review",
+              reply_media_id: null,
+              status: "sent",
+            });
+
+            return json(req, { ok: true, review_queued: true });
+          }
+        }
+      }
+    }
 
     const { data: seen, error: seenError } = await supabase
       .from("telegram_seen_chats")
