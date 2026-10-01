@@ -42,6 +42,16 @@ async function sha256Hex(value: string) {
   return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+function normalizeMessageText(value: unknown) {
+  return String(value ?? "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function sanitizeBotInfo(result: any) {
   if (!result) return null;
   return {
@@ -315,11 +325,11 @@ Deno.serve(async (req: Request) => {
     if (rulesError) throw rulesError;
 
     const incomingOriginal = message.text.trim();
-    const incoming = incomingOriginal.toLowerCase();
+    const incoming = normalizeMessageText(incomingOriginal);
     let matchedRule: any = null;
 
     for (const rule of rules ?? []) {
-      const trigger = String(rule.trigger_text ?? "").trim().toLowerCase();
+      const trigger = normalizeMessageText(rule.trigger_text);
       const matches =
         (rule.match_type === "new_chat" && isNewChat) ||
         (rule.match_type === "exact" && incoming === trigger) ||
