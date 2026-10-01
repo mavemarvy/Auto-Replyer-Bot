@@ -278,7 +278,9 @@ function renderStatus() {
   const plans = s.plans || [];
   const basic = plans.find((p) => p.code === "basic");
   const pro = plans.find((p) => p.code === "pro");
-  const canStartSubscription = !tenant.is_platform_owner && !access.allowed;
+  const canStartSubscription = !tenant.is_platform_owner &&
+    access.source !== "subscription" &&
+    access.source !== "referral_bonus";
 
   if (basic) {
     const el = $("basicPlanCard");
@@ -352,6 +354,7 @@ function renderOwnerAdmin() {
   $("adminTrials").textContent = state.ownerStats.trial_users || 0;
   $("adminRefs").textContent = state.ownerStats.qualified_referrals || 0;
   $("adminBonusHours").textContent = state.ownerStats.referral_bonus_hours_issued || 0;
+  $("adminStarBalance").textContent = Number(state.ownerStats.bot_star_balance || 0).toLocaleString(undefined,{maximumFractionDigits:3}) + " ⭐";
   const plans = state.status && state.status.plans ? state.status.plans : [];
   const basic = plans.find((p) => p.code === "basic");
   const pro = plans.find((p) => p.code === "pro");
@@ -680,6 +683,11 @@ $("globalToggle").addEventListener("change", async (e) => {
 
 
 async function startStarsSubscription(planCode) {
+  const access = state.status && state.status.access ? state.status.access : {};
+  if (access.source === "trial") {
+    const ok = confirm("Your free trial is still active. If you subscribe now, the paid 30-day subscription starts immediately and replaces the remaining trial time. Continue?");
+    if (!ok) return;
+  }
   try {
     const data = await api("invoice", { method:"POST", body:{ plan_code:planCode } });
     if (!data.invoice_url) throw new Error("invoice_unavailable");
@@ -702,7 +710,6 @@ async function startStarsSubscription(planCode) {
     }
   } catch (err) {
     const map = {
-      trial_still_active: "Your free trial is still active. Subscribe after it ends.",
       referral_bonus_active: "Your referral Pro hour is active. Subscribe after it ends.",
       stars_price_not_configured: "This plan's Stars price is not configured yet.",
       already_subscribed: "You already have this subscription.",
