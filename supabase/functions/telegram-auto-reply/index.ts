@@ -1286,9 +1286,12 @@ async function handleStarsPreCheckout(query:any, supabase:any, botToken:string) 
   if (intentQ.error) throw intentQ.error;
   const intent = intentQ.data;
 
-  const valid = payload.startsWith("arsub:") && intent &&
-    ["pending","approved","paid"].includes(intent.status) &&
-    new Date(intent.expires_at).getTime() > Date.now() &&
+  const checkoutStillValid = intent && (
+    intent.status === "paid" ||
+    (["pending","approved"].includes(intent.status) && new Date(intent.expires_at).getTime() > Date.now())
+  );
+
+  const valid = payload.startsWith("arsub:") && intent && checkoutStillValid &&
     Number(intent.telegram_tenants?.telegram_user_id) === Number(query?.from?.id) &&
     query?.currency === "XTR" &&
     Number(query?.total_amount) === Number(intent.amount) &&
