@@ -1104,6 +1104,66 @@ async function v3HandleDirectBotMessage(message:any, supabase:any, botToken:stri
     return;
   }
 
+  if (text === "/dashboard") {
+    await telegram("sendMessage",{
+      chat_id:message.chat.id,
+      text:"Open your private Auto Replyer dashboard:",
+      reply_markup:{inline_keyboard:[[{text:"⚙️ Open My Dashboard",web_app:{url:DASHBOARD_URL}}]]}
+    },botToken);
+    return;
+  }
+
+  if (text === "/resetpin") {
+    await supabase.from("telegram_tenants")
+      .update({pin_hash:null,updated_at:new Date().toISOString()})
+      .eq("id",tenant.id).eq("telegram_user_id",message.from.id);
+    await supabase.from("telegram_auth_security").delete().eq("tenant_id",tenant.id);
+    await telegram("sendMessage",{
+      chat_id:message.chat.id,
+      text:"🔐 Your dashboard PIN has been reset. Open the dashboard and create a new 6–12 digit PIN.",
+      reply_markup:{inline_keyboard:[[{text:"⚙️ Open Dashboard",web_app:{url:DASHBOARD_URL}}]]}
+    },botToken);
+    return;
+  }
+
+  if (text === "/help") {
+    await telegram("sendMessage",{
+      chat_id:message.chat.id,
+      text:"Auto Replyer Bot commands:\n\n/start — open/create account\n/dashboard — open dashboard\n/library — list saved media\n/upload Name — save last media\n/cancel — discard pending media\n/resetpin — reset dashboard PIN\n/terms — subscription terms\n/support your message — general help\n/paysupport your message — payment help"
+    },botToken);
+    return;
+  }
+
+  if (text === "/terms") {
+    await telegram("sendMessage",{
+      chat_id:message.chat.id,
+      text:"📄 Auto Replyer Bot Terms\n\n• New users receive a 30-day full-feature trial.\n• Basic includes text/basic auto replies.\n• Pro includes flows, media replies, media triggers, verification and up to 5 saved media items.\n• Paid plans renew every 30 days through Telegram Stars until renewal is canceled.\n• Canceling renewal keeps paid access until the current paid period ends.\n• Referral hours are promotional Pro access and have no cash value.\n• You are responsible for the messages and automation rules you create.\n• Use /paysupport for payment issues.\n\nTelegram does not provide purchase support for this bot; support is handled by the bot operator."
+    },botToken);
+    return;
+  }
+
+  if (text === "/support" || text === "/paysupport") {
+    await telegram("sendMessage",{
+      chat_id:message.chat.id,
+      text:text === "/paysupport"
+        ? "Send /paysupport followed by your payment issue."
+        : "Send /support followed by your question."
+    },botToken);
+    return;
+  }
+
+  if (text.toLowerCase().startsWith("/support ") || text.toLowerCase().startsWith("/paysupport ")) {
+    const paymentSupport=text.toLowerCase().startsWith("/paysupport ");
+    const body=text.slice(paymentSupport ? 12 : 9).trim();
+    if (!body) return;
+    const ticket=await forwardSupportTicket(supabase,tenant,paymentSupport?"payment":"general",body,botToken);
+    await telegram("sendMessage",{
+      chat_id:message.chat.id,
+      text:"✅ Support request received.\nTicket: "+ticket.id
+    },botToken);
+    return;
+  }
+
   if (text === "/library") {
     const {data,error} = await supabase.from("telegram_media_library")
       .select("display_name,media_type,created_at")
