@@ -81,6 +81,15 @@
         </div>
       </section>
 
+      <section id="subscriptionManageCard" class="card subscription-manage hidden">
+        <div>
+          <div class="eyebrow">RECURRING SUBSCRIPTION</div>
+          <strong id="subscriptionManageTitle">Subscription active</strong>
+          <p id="subscriptionManageDetail" class="muted compact"></p>
+        </div>
+        <button id="subscriptionRenewalBtn" type="button" class="secondary">Manage renewal</button>
+      </section>
+
       <section id="plansSection" class="plans-grid hidden">
         <article id="basicPlanCard" class="card plan-card">
           <div class="plan-head">
@@ -95,7 +104,7 @@
             <li>New-messenger greeting</li>
             <li>Default fallback reply</li>
           </ul>
-          <button id="basicSubscribeBtn" class="secondary full" disabled>Telegram Stars setup next</button>
+          <button id="basicSubscribeBtn" class="secondary full" type="button">Subscribe with Telegram Stars</button>
         </article>
 
         <article id="proPlanCard" class="card plan-card featured-plan">
@@ -113,9 +122,10 @@
             <li>Media triggers and proof verification</li>
             <li>Approve / Reject workflow</li>
           </ul>
-          <button id="proSubscribeBtn" class="primary full" disabled>Telegram Stars setup next</button>
+          <button id="proSubscribeBtn" class="primary full" type="button">Subscribe with Telegram Stars</button>
         </article>
       </section>
+      <p id="starsPricingNote" class="pricing-note">Telegram checkout uses Stars. ₦1,000 / $1 and ₦2,000 / $2 are target reference prices; the user's actual cost to acquire Stars can vary by platform, VAT and region.</p>
 
       <section class="stats-grid pro-stats">
         <article class="card stat"><span class="stat-label">Rules</span><strong id="statRules">—</strong></article>
@@ -258,6 +268,14 @@
               <div><span>Qualified refs</span><strong id="adminRefs">0</strong></div>
               <div><span>Bonus hrs issued</span><strong id="adminBonusHours">0</strong></div>
             </div>
+            <div class="divider owner-divider"></div>
+            <div class="eyebrow">TELEGRAM STARS PRICING</div>
+            <p class="muted small">These are the actual recurring in-Telegram prices. The ₦/$ amounts shown on plan cards are reference targets only.</p>
+            <div class="field-grid">
+              <label><span>Basic Stars / month</span><input id="basicStarsPrice" type="number" min="1" max="9999" step="1" /></label>
+              <label><span>Pro Stars / month</span><input id="proStarsPrice" type="number" min="2" max="10000" step="1" /></label>
+            </div>
+            <button id="saveStarsPricesBtn" type="button" class="secondary full">Save Stars prices</button>
           </section>
           <section class="card section-card">
             <div class="section-head"><div><div class="eyebrow">MY MEDIA LIBRARY</div><h2>Voice, audio & files</h2></div><span id="mediaCountBadge" class="badge">0</span></div>
