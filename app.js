@@ -89,8 +89,10 @@ function renderStatus() {
 function populateSelectors() {
   const mediaSelect = $("mediaId");
   const previousMedia = mediaSelect.value;
+  const wantedType = $("replyType").value;
+  const compatibleMedia = wantedType === "text" ? state.media : state.media.filter((m) => m.media_type === wantedType);
   mediaSelect.innerHTML = '<option value="">Choose saved media…</option>' +
-    state.media.map((m) => '<option value="' + escapeHtml(m.id) + '">' + escapeHtml(m.display_name) + " — " + escapeHtml(m.media_type) + "</option>").join("");
+    compatibleMedia.map((m) => '<option value="' + escapeHtml(m.id) + '">' + escapeHtml(m.display_name) + " — " + escapeHtml(m.media_type) + "</option>").join("");
   if (Array.from(mediaSelect.options).some((o) => o.value === previousMedia)) mediaSelect.value = previousMedia;
 
   const next = $("nextRuleId");
@@ -292,7 +294,7 @@ $("refreshBtn").addEventListener("click", async () => {
   try { await loadAll(); toast("Dashboard refreshed"); } catch (e) { toast("Refresh failed: " + e.message); }
 });
 $("matchType").addEventListener("change", updateFormVisibility);
-$("replyType").addEventListener("change", updateFormVisibility);
+$("replyType").addEventListener("change", () => { populateSelectors(); updateFormVisibility(); });
 $("notifyAdmin").addEventListener("change", updateFormVisibility);
 $("cancelEditBtn").addEventListener("click", resetRuleForm);
 
