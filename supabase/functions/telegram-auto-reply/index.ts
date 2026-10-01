@@ -1723,7 +1723,6 @@ async function publicApi(req:Request, action:string, supabase:any, botToken:stri
   if (action === "invoice" && req.method === "POST") {
     if (tenant.is_platform_owner) return json(req,{ok:false,error:"owner_free_forever"},400);
     const access = await getTenantAccess(supabase,tenant);
-    if (access.source === "trial") return json(req,{ok:false,error:"trial_still_active",expires_at:access.expires_at},409);
     if (access.source === "referral_bonus") return json(req,{ok:false,error:"referral_bonus_active",expires_at:access.expires_at},409);
 
     const body = await req.json();
@@ -1826,12 +1825,13 @@ async function publicApi(req:Request, action:string, supabase:any, botToken:stri
 
   if (action === "owner_stats" && req.method === "GET") {
     if (!tenant.is_platform_owner) return json(req,{ok:false,error:"forbidden"},403);
-    const [tenantsQ,trialsQ,activeQ,qualifiedQ,bonusQ] = await Promise.all([
+    const [tenantsQ,trialsQ,activeQ,qualifiedQ,bonusQ,starBalanceQ] = await Promise.all([
       supabase.from("telegram_tenants").select("*",{count:"exact",head:true}),
       supabase.from("telegram_tenants").select("*",{count:"exact",head:true}).eq("subscription_status","trial"),
       supabase.from("telegram_tenants").select("*",{count:"exact",head:true}).eq("subscription_status","active"),
       supabase.from("telegram_referrals").select("*",{count:"exact",head:true}).eq("status","qualified"),
-      supabase.from("telegram_referral_bonus_events").select("seconds_added")
+      supabase.from("telegram_referral_bonus_events").select("seconds_added"),
+      telegram("getMyStarBalance",{},botToken)
     ]);
     if (tenantsQ.error) throw tenantsQ.error;
     if (trialsQ.error) throw trialsQ.error;
@@ -1844,7 +1844,8 @@ async function publicApi(req:Request, action:string, supabase:any, botToken:stri
       trial_users:Math.max(0,(trialsQ.count??0)-(tenant.subscription_status==="trial"?1:0)),
       active_paid_or_owner:activeQ.count??0,
       qualified_referrals:qualifiedQ.count??0,
-      referral_bonus_hours_issued:Math.floor(bonusSeconds/3600)
+      referral_bonus_hours_issued:Math.floor(bonusSeconds/3600),
+      bot_star_balance:Number(starBalanceQ?.result?.amount ?? 0) + Number(starBalanceQ?.result?.nanostar_amount ?? 0)/1000000000
     }});
   }
 
