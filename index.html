@@ -66,11 +66,55 @@
 
       <section id="trialBanner" class="card trial-banner">
         <div>
-          <div class="eyebrow">PLAN</div>
-          <strong id="trialTitle">30-day free trial</strong>
-          <p id="trialDetail" class="muted compact">Payments are not enforced yet.</p>
+          <div class="eyebrow">ACCESS</div>
+          <strong id="trialTitle">Checking your plan…</strong>
+          <p id="trialDetail" class="muted compact">Please wait.</p>
         </div>
-        <span id="trialBadge" class="badge">FREE TRIAL</span>
+        <span id="trialBadge" class="badge">…</span>
+      </section>
+
+      <section id="lockedBanner" class="card locked-banner hidden">
+        <div>
+          <div class="eyebrow">AUTO REPLY PAUSED</div>
+          <h2>Your trial/subscription has ended</h2>
+          <p class="muted">Your rules and media are still saved. Subscribe again or activate an earned referral hour to resume automatic replies.</p>
+        </div>
+      </section>
+
+      <section id="plansSection" class="plans-grid hidden">
+        <article id="basicPlanCard" class="card plan-card">
+          <div class="plan-head">
+            <div><div class="eyebrow">BASIC</div><h2>Text Auto Reply</h2></div>
+            <span class="badge">MONTHLY</span>
+          </div>
+          <div class="plan-price"><strong>₦1,000</strong><span>/month</span></div>
+          <div class="muted small">External reference price: $1/month</div>
+          <ul class="plan-benefits">
+            <li>Text replies</li>
+            <li>Exact / contains / starts-with / ends-with</li>
+            <li>New-messenger greeting</li>
+            <li>Default fallback reply</li>
+          </ul>
+          <button id="basicSubscribeBtn" class="secondary full" disabled>Telegram Stars setup next</button>
+        </article>
+
+        <article id="proPlanCard" class="card plan-card featured-plan">
+          <div class="plan-head">
+            <div><div class="eyebrow">PRO</div><h2>Full Automation</h2></div>
+            <span class="badge">BEST</span>
+          </div>
+          <div class="plan-price"><strong>₦2,000</strong><span>/month</span></div>
+          <div class="muted small">External reference price: $2/month</div>
+          <ul class="plan-benefits">
+            <li>Everything in Basic</li>
+            <li>Reply A → customer reply → Reply B flows</li>
+            <li>Voice, audio, photo, video & file replies</li>
+            <li>Up to 5 saved media items</li>
+            <li>Media triggers and proof verification</li>
+            <li>Approve / Reject workflow</li>
+          </ul>
+          <button id="proSubscribeBtn" class="primary full" disabled>Telegram Stars setup next</button>
+        </article>
       </section>
 
       <section class="stats-grid pro-stats">
@@ -185,6 +229,36 @@
         </div>
 
         <aside class="right-col">
+          <section id="referralCard" class="card section-card">
+            <div class="section-head">
+              <div><div class="eyebrow">REFERRAL REWARDS</div><h2>Earn free Pro hours</h2></div>
+              <span id="bonusHoursBadge" class="badge">0 HRS</span>
+            </div>
+            <p class="muted">Every 2 qualified referrals earns 1 hour of full Pro auto-reply access after your trial/subscription ends.</p>
+            <label><span>Your referral link</span>
+              <div class="copy-row">
+                <input id="referralLink" type="text" readonly />
+                <button id="copyReferralBtn" type="button" class="secondary">Copy</button>
+              </div>
+            </label>
+            <div class="mini-stats">
+              <div><span>Qualified</span><strong id="qualifiedReferrals">0</strong></div>
+              <div><span>Total</span><strong id="totalReferrals">0</strong></div>
+              <div><span>Hours ready</span><strong id="bonusHoursReady">0</strong></div>
+            </div>
+            <button id="claimReferralHourBtn" class="primary full hidden">Activate 1 free Pro hour</button>
+            <p id="bonusActiveText" class="tiny"></p>
+          </section>
+
+          <section id="ownerAdminCard" class="card section-card hidden">
+            <div class="section-head"><div><div class="eyebrow">PLATFORM OWNER</div><h2>Admin summary</h2></div></div>
+            <div class="mini-stats admin-stats">
+              <div><span>Public users</span><strong id="adminUsers">0</strong></div>
+              <div><span>Trials</span><strong id="adminTrials">0</strong></div>
+              <div><span>Qualified refs</span><strong id="adminRefs">0</strong></div>
+              <div><span>Bonus hrs issued</span><strong id="adminBonusHours">0</strong></div>
+            </div>
+          </section>
           <section class="card section-card">
             <div class="section-head"><div><div class="eyebrow">MY MEDIA LIBRARY</div><h2>Voice, audio & files</h2></div><span id="mediaCountBadge" class="badge">0</span></div>
             <div class="help-box">
