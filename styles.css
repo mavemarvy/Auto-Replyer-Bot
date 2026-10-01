@@ -177,3 +177,12 @@ button:disabled,input:disabled,select:disabled,textarea:disabled{opacity:.48;cur
 @media(max-width:700px){
   .plans-grid{grid-template-columns:1fr}
 }
+
+.subscription-manage{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 18px;margin-bottom:14px;border-color:#385241}
+.subscription-manage strong{font-size:15px}
+.pricing-note{font-size:11px;color:#777;line-height:1.45;margin:-4px 4px 14px}
+.owner-divider{margin:18px 0}
+@media(max-width:560px){
+  .subscription-manage{align-items:flex-start;flex-direction:column}
+  .subscription-manage button{width:100%}
+}
