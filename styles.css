@@ -123,3 +123,20 @@ footer{text-align:center;color:#505050;font-size:11px;padding:26px 0 0}
   .rule-top{flex-direction:column}
   .rule-actions{justify-content:flex-start}
 }
+.pro-stats{grid-template-columns:repeat(3,1fr)}
+.field-note{color:#707070;font-size:11px;font-weight:500}
+.divider{height:1px;background:#242424;margin:2px 0}
+.review-options{display:flex;flex-direction:column;gap:12px;padding:14px;border:1px solid #2c2c2c;border-radius:14px;background:#0d0d0d}
+.help-box{padding:14px;border-radius:14px;background:#0b1510;border:1px solid #1f3a2a;margin-bottom:14px;color:#b9c9c0;font-size:12px;line-height:1.5}
+.help-box p{margin:7px 0}
+.help-box code{display:inline-block;background:#07100b;border:1px solid #244b34;border-radius:8px;padding:5px 8px;color:#72e5a7}
+.media-list{display:flex;flex-direction:column;gap:8px}
+.media-item{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px;background:#0c0c0c;border:1px solid #272727;border-radius:12px}
+.small{font-size:11px;margin-top:4px}
+.flow-chip{display:inline-block;margin-top:8px;padding:6px 8px;border-radius:9px;background:#102019;border:1px solid #234633;color:#83dda9;font-size:11px}
+.review-item{padding:12px;background:#0c0c0c;border:1px solid #262626;border-radius:12px}
+.review-status{display:inline-block;margin-top:7px;padding:4px 7px;border-radius:8px;font-size:10px;text-transform:uppercase;font-weight:800;background:#252525;color:#aaa}
+.review-status.pending{background:#2c2314;color:#f3c56f}
+.review-status.approved{background:#102419;color:#7ce3a8}
+.review-status.rejected{background:#2b1515;color:#ff9d9d}
+@media(max-width:860px){.pro-stats{grid-template-columns:repeat(2,1fr)}}
