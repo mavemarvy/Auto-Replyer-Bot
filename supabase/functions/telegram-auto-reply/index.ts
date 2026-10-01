@@ -375,6 +375,27 @@ async function handleDirectBotMessage(message: any, supabase: any, botToken: str
     return;
   }
 
+  if (text === "/resetpin") {
+    await supabase.from("telegram_tenants")
+      .update({ pin_hash:null, updated_at:new Date().toISOString() })
+      .eq("id",tenant.id).eq("telegram_user_id",message.from.id);
+    await telegram("sendMessage",{
+      chat_id:message.chat.id,
+      text:"🔐 Your dashboard PIN has been reset. Open the dashboard again and create a new 6–12 digit PIN.",
+      reply_markup:{inline_keyboard:[[{text:"⚙️ Open Dashboard",web_app:{url:DASHBOARD_URL}}]]}
+    },botToken);
+    return;
+  }
+
+  if (text === "/dashboard") {
+    await telegram("sendMessage",{
+      chat_id:message.chat.id,
+      text:"Open your private Auto Replyer dashboard:",
+      reply_markup:{inline_keyboard:[[{text:"⚙️ Open My Dashboard",web_app:{url:DASHBOARD_URL}}]]}
+    },botToken);
+    return;
+  }
+
   if (text === "/library") {
     const { data, error } = await supabase
       .from("telegram_media_library")
