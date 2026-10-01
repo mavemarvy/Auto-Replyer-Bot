@@ -278,17 +278,37 @@ function renderStatus() {
   const plans = s.plans || [];
   const basic = plans.find((p) => p.code === "basic");
   const pro = plans.find((p) => p.code === "pro");
+  const canStartSubscription = !tenant.is_platform_owner && !access.allowed;
+
   if (basic) {
     const el = $("basicPlanCard");
     el.classList.toggle("current-plan", access.source === "subscription" && access.level === "basic");
     const btn = $("basicSubscribeBtn");
-    btn.textContent = basic.stars_price ? (basic.stars_price + " Stars / month") : "Telegram Stars price setup next";
+    btn.textContent = basic.stars_price ? (basic.stars_price + " Stars / month") : "Stars price not configured";
+    btn.disabled = !basic.stars_price || !canStartSubscription;
   }
   if (pro) {
     const el = $("proPlanCard");
-    el.classList.toggle("current-plan", access.level === "pro" && access.source === "subscription");
+    el.classList.toggle("current-plan", access.source === "subscription" && access.level === "pro");
     const btn = $("proSubscribeBtn");
-    btn.textContent = pro.stars_price ? (pro.stars_price + " Stars / month") : "Telegram Stars price setup next";
+    btn.textContent = pro.stars_price ? (pro.stars_price + " Stars / month") : "Stars price not configured";
+    btn.disabled = !pro.stars_price || !canStartSubscription;
+  }
+
+  $("starsPricingNote").classList.toggle("hidden", Boolean(tenant.is_platform_owner));
+
+  const sub = s.subscription || null;
+  const hasLiveStarSub = sub && sub.provider === "telegram_stars" && sub.current_period_end &&
+    new Date(sub.current_period_end).getTime() > Date.now();
+  $("subscriptionManageCard").classList.toggle("hidden", !hasLiveStarSub || tenant.is_platform_owner);
+  if (hasLiveStarSub) {
+    $("subscriptionManageTitle").textContent =
+      (sub.plan_code === "pro" ? "Pro" : "Basic") + " recurring subscription";
+    $("subscriptionManageDetail").textContent = sub.auto_renew_enabled
+      ? "Renews automatically with Telegram Stars. Current period ends " + formatTime(sub.current_period_end) + "."
+      : "Renewal is canceled. Access remains active until " + formatTime(sub.current_period_end) + ".";
+    $("subscriptionRenewalBtn").textContent = sub.auto_renew_enabled ? "Cancel renewal" : "Re-enable renewal";
+    $("subscriptionRenewalBtn").dataset.action = sub.auto_renew_enabled ? "cancel" : "resume";
   }
 
   renderReferral();
@@ -332,6 +352,11 @@ function renderOwnerAdmin() {
   $("adminTrials").textContent = state.ownerStats.trial_users || 0;
   $("adminRefs").textContent = state.ownerStats.qualified_referrals || 0;
   $("adminBonusHours").textContent = state.ownerStats.referral_bonus_hours_issued || 0;
+  const plans = state.status && state.status.plans ? state.status.plans : [];
+  const basic = plans.find((p) => p.code === "basic");
+  const pro = plans.find((p) => p.code === "pro");
+  if (basic) $("basicStarsPrice").value = basic.stars_price || "";
+  if (pro) $("proStarsPrice").value = pro.stars_price || "";
 }
 
 function clientRuleAllowed(rule, access) {
