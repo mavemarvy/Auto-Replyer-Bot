@@ -404,6 +404,36 @@ async function handleDirectBotMessage(message: any, supabase: any, botToken: str
     return;
   }
 
+  if (text === "/terms") {
+    await telegram("sendMessage",{
+      chat_id:message.chat.id,
+      text:"📄 Auto Replyer Bot Terms\n\n• New users receive a 30-day full-feature trial.\n• Basic includes text/basic auto replies.\n• Pro includes flows, media replies, media triggers, verification and up to 5 saved media items.\n• Paid plans renew every 30 days through Telegram Stars until renewal is canceled.\n• Canceling renewal keeps paid access until the current paid period ends.\n• Referral hours are promotional Pro access and have no cash value.\n• You are responsible for the messages and automation rules you create.\n• For payment issues use /paysupport followed by your message.\n\nTelegram does not provide purchase support for this bot; support is handled by the bot operator."
+    },botToken);
+    return;
+  }
+
+  if (text === "/support" || text === "/paysupport") {
+    await telegram("sendMessage",{
+      chat_id:message.chat.id,
+      text:text === "/paysupport"
+        ? "Send /paysupport followed by your payment issue. Example:\n/paysupport My subscription did not activate."
+        : "Send /support followed by your question. Example:\n/support I need help setting up a flow."
+    },botToken);
+    return;
+  }
+
+  if (text.toLowerCase().startsWith("/support ") || text.toLowerCase().startsWith("/paysupport ")) {
+    const paymentSupport = text.toLowerCase().startsWith("/paysupport ");
+    const body = text.slice(paymentSupport ? 12 : 9).trim();
+    if (!body) return;
+    const ticket = await forwardSupportTicket(supabase,tenant,paymentSupport?"payment":"general",body,botToken);
+    await telegram("sendMessage",{
+      chat_id:message.chat.id,
+      text:"✅ Support request received.\nTicket: " + ticket.id
+    },botToken);
+    return;
+  }
+
   if (text === "/library") {
     const { data, error } = await supabase
       .from("telegram_media_library")
@@ -1208,6 +1238,258 @@ async function v3HandleReviewCallback(query:any, supabase:any, botToken:string) 
   return true;
 }
 
+
+async function createTelegramStarsInvoice(supabase:any, tenant:any, plan:any, botToken:string) {
+  const amount = Number(plan?.stars_price ?? 0);
+  if (!Number.isInteger(amount) || amount < 1 || amount > 10000) throw new Error("stars_price_not_configured");
+
+  const existingQ = await supabase.from("telegram_subscriptions").select("*").eq("tenant_id",tenant.id).maybeSingle();
+  if (existingQ.error) throw existingQ.error;
+  const existing = existingQ.data;
+  const activeUntil = existing?.current_period_end ? new Date(existing.current_period_end).getTime() : 0;
+  if (existing?.provider === "telegram_stars" && existing?.status === "active" && activeUntil > Date.now()) {
+    throw new Error(existing.plan_code === plan.code ? "already_subscribed" : "active_subscription_exists");
+  }
+
+  const id = crypto.randomUUID();
+  const payload = "arsub:" + id;
+  const intentQ = await supabase.from("telegram_payment_intents").insert({
+    id, tenant_id:tenant.id, plan_code:plan.code, provider:"telegram_stars",
+    currency:"XTR", amount, invoice_payload:payload, status:"pending",
+    expires_at:new Date(Date.now()+3600000).toISOString()
+  });
+  if (intentQ.error) throw intentQ.error;
+
+  const description = plan.code === "pro"
+    ? "Full automation with flows, media replies and verification."
+    : "Text auto replies with basic matching rules.";
+
+  const invoice = await telegram("createInvoiceLink",{
+    title:"Auto Replyer " + plan.name,
+    description,
+    payload,
+    provider_token:"",
+    currency:"XTR",
+    prices:[{label:plan.name + " monthly subscription",amount}],
+    subscription_period:2592000
+  },botToken);
+
+  return {intent_id:id,invoice_url:invoice.result,amount,currency:"XTR"};
+}
+
+
+async function handleStarsPreCheckout(query:any, supabase:any, botToken:string) {
+  const payload = String(query?.invoice_payload ?? "");
+  const intentQ = await supabase.from("telegram_payment_intents")
+    .select("*, telegram_tenants(telegram_user_id), telegram_plans(is_active)")
+    .eq("invoice_payload",payload).maybeSingle();
+  if (intentQ.error) throw intentQ.error;
+  const intent = intentQ.data;
+
+  const valid = payload.startsWith("arsub:") && intent &&
+    ["pending","approved","paid"].includes(intent.status) &&
+    new Date(intent.expires_at).getTime() > Date.now() &&
+    Number(intent.telegram_tenants?.telegram_user_id) === Number(query?.from?.id) &&
+    query?.currency === "XTR" &&
+    Number(query?.total_amount) === Number(intent.amount) &&
+    intent.telegram_plans?.is_active === true;
+
+  if (!valid) {
+    await telegram("answerPreCheckoutQuery",{
+      pre_checkout_query_id:query.id,
+      ok:false,
+      error_message:"This subscription checkout is invalid or expired. Please create a new invoice."
+    },botToken);
+    return false;
+  }
+
+  await telegram("answerPreCheckoutQuery",{pre_checkout_query_id:query.id,ok:true},botToken);
+  if (intent.status !== "paid") {
+    await supabase.from("telegram_payment_intents")
+      .update({status:"approved",updated_at:new Date().toISOString()})
+      .eq("id",intent.id);
+  }
+  return true;
+}
+
+
+async function activateStarsPayment(message:any, supabase:any, botToken:string) {
+  const payment = message?.successful_payment;
+  if (!payment || payment.currency !== "XTR") return false;
+
+  const payload = String(payment.invoice_payload ?? "");
+  if (!payload.startsWith("arsub:")) return false;
+
+  const intentQ = await supabase.from("telegram_payment_intents")
+    .select("*, telegram_tenants(*)")
+    .eq("invoice_payload",payload).maybeSingle();
+  if (intentQ.error) throw intentQ.error;
+  const intent = intentQ.data;
+  if (!intent?.telegram_tenants) return false;
+
+  const tenant = intent.telegram_tenants;
+  if (Number(tenant.telegram_user_id) !== Number(message?.from?.id)) return false;
+  if (Number(payment.total_amount) !== Number(intent.amount)) return false;
+
+  const expiration = payment.subscription_expiration_date
+    ? new Date(Number(payment.subscription_expiration_date) * 1000).toISOString()
+    : new Date(Date.now() + 2592000 * 1000).toISOString();
+
+  const existingPayQ = await supabase.from("telegram_star_payments")
+    .select("id").eq("telegram_payment_charge_id",payment.telegram_payment_charge_id).maybeSingle();
+  if (existingPayQ.error) throw existingPayQ.error;
+
+  if (!existingPayQ.data) {
+    const payQ = await supabase.from("telegram_star_payments").insert({
+      tenant_id:tenant.id,
+      intent_id:intent.id,
+      plan_code:intent.plan_code,
+      invoice_payload:payload,
+      telegram_payment_charge_id:payment.telegram_payment_charge_id,
+      provider_payment_charge_id:payment.provider_payment_charge_id || null,
+      currency:"XTR",
+      amount:Number(payment.total_amount),
+      is_recurring:payment.is_recurring === true,
+      is_first_recurring:payment.is_first_recurring === true,
+      subscription_expiration_date:expiration,
+      raw_payment:payment
+    });
+    if (payQ.error) throw payQ.error;
+  }
+
+  const currentQ = await supabase.from("telegram_subscriptions")
+    .select("*").eq("tenant_id",tenant.id).maybeSingle();
+  if (currentQ.error) throw currentQ.error;
+  const current = currentQ.data;
+  const manageChargeId =
+    payment.is_first_recurring === true || !current?.telegram_payment_charge_id
+      ? payment.telegram_payment_charge_id
+      : current.telegram_payment_charge_id;
+
+  const subQ = await supabase.from("telegram_subscriptions").upsert({
+    tenant_id:tenant.id,
+    plan_code:intent.plan_code,
+    provider:"telegram_stars",
+    provider_customer_id:String(tenant.telegram_user_id),
+    provider_subscription_id:manageChargeId,
+    telegram_payment_charge_id:manageChargeId,
+    status:"active",
+    current_period_start:new Date().toISOString(),
+    current_period_end:expiration,
+    auto_renew_enabled:true,
+    canceled_at:null,
+    updated_at:new Date().toISOString()
+  });
+  if (subQ.error) throw subQ.error;
+
+  const tenantQ = await supabase.from("telegram_tenants").update({
+    plan_code:intent.plan_code,
+    subscription_status:"active",
+    updated_at:new Date().toISOString()
+  }).eq("id",tenant.id);
+  if (tenantQ.error) throw tenantQ.error;
+
+  await supabase.from("telegram_payment_intents")
+    .update({status:"paid",updated_at:new Date().toISOString()})
+    .eq("id",intent.id);
+
+  await telegram("sendMessage",{
+    chat_id:Number(tenant.telegram_user_id),
+    text:"✅ " + (intent.plan_code === "pro" ? "Pro" : "Basic") +
+      " subscription activated.\n\nYour Telegram Stars subscription is active until " +
+      new Date(expiration).toLocaleString() + "."
+  },botToken);
+
+  return true;
+}
+
+
+async function handleStarsSubscriptionUpdate(update:any, supabase:any) {
+  const change = update?.subscription;
+  if (!change?.user?.id || !change?.invoice_payload) return false;
+
+  const intentQ = await supabase.from("telegram_payment_intents")
+    .select("tenant_id,plan_code").eq("invoice_payload",String(change.invoice_payload)).maybeSingle();
+  if (intentQ.error) throw intentQ.error;
+  if (!intentQ.data) return false;
+
+  const tenantQ = await supabase.from("telegram_tenants").select("*")
+    .eq("id",intentQ.data.tenant_id)
+    .eq("telegram_user_id",Number(change.user.id))
+    .maybeSingle();
+  if (tenantQ.error) throw tenantQ.error;
+  if (!tenantQ.data) return false;
+
+  const currentQ = await supabase.from("telegram_subscriptions")
+    .select("*").eq("tenant_id",tenantQ.data.id).maybeSingle();
+  if (currentQ.error) throw currentQ.error;
+  const current = currentQ.data;
+  if (!current) return false;
+
+  const periodStillActive = current.current_period_end &&
+    new Date(current.current_period_end).getTime() > Date.now();
+
+  if (change.state === "canceled") {
+    await supabase.from("telegram_subscriptions").update({
+      auto_renew_enabled:false,
+      canceled_at:new Date().toISOString(),
+      status:periodStillActive ? "active" : "canceled",
+      updated_at:new Date().toISOString()
+    }).eq("tenant_id",tenantQ.data.id);
+
+    if (!periodStillActive) {
+      await supabase.from("telegram_tenants").update({
+        subscription_status:"canceled",updated_at:new Date().toISOString()
+      }).eq("id",tenantQ.data.id);
+    }
+  } else if (change.state === "active") {
+    await supabase.from("telegram_subscriptions").update({
+      auto_renew_enabled:true,
+      canceled_at:null,
+      status:periodStillActive ? "active" : current.status,
+      updated_at:new Date().toISOString()
+    }).eq("tenant_id",tenantQ.data.id);
+  } else if (change.state === "failed") {
+    await supabase.from("telegram_subscriptions").update({
+      auto_renew_enabled:false,
+      status:periodStillActive ? "active" : "past_due",
+      updated_at:new Date().toISOString()
+    }).eq("tenant_id",tenantQ.data.id);
+
+    if (!periodStillActive) {
+      await supabase.from("telegram_tenants").update({
+        subscription_status:"past_due",updated_at:new Date().toISOString()
+      }).eq("id",tenantQ.data.id);
+    }
+  }
+  return true;
+}
+
+
+async function forwardSupportTicket(supabase:any, tenant:any, category:string, message:string, botToken:string) {
+  const ticketQ = await supabase.from("telegram_support_tickets").insert({
+    tenant_id:tenant.id,category,message,status:"open"
+  }).select().single();
+  if (ticketQ.error) throw ticketQ.error;
+
+  const ownerQ = await supabase.from("telegram_tenants")
+    .select("id").eq("is_platform_owner",true).limit(1).maybeSingle();
+  if (ownerQ.error) throw ownerQ.error;
+
+  if (ownerQ.data) {
+    const ownerChat = await getTenantSetting(supabase,ownerQ.data.id,"notification_chat_id",null);
+    if (ownerChat) {
+      await telegram("sendMessage",{
+        chat_id:ownerChat,
+        text:"🧾 " + (category === "payment" ? "Payment support" : "Support") +
+          " ticket\n\nUser: " + (tenant.display_name || tenant.username || tenant.telegram_user_id) +
+          "\nTicket: " + ticketQ.data.id + "\n\n" + message
+      },botToken);
+    }
+  }
+  return ticketQ.data;
+}
+
 async function publicApi(req:Request, action:string, supabase:any, botToken:string, masterSecret:string) {
   if (action === "bootstrap" || action === "set_pin" || action === "login") {
     if (req.method !== "POST") return json(req,{ok:false,error:"method_not_allowed"},405);
@@ -1315,6 +1597,8 @@ async function publicApi(req:Request, action:string, supabase:any, botToken:stri
     const autoEnabled = await getTenantSetting(supabase,tenant.id,"auto_reply_enabled",true);
     const access = await getTenantAccess(supabase,tenant);
     const referral = await getReferralSummary(supabase,tenant);
+    const subQ = await supabase.from("telegram_subscriptions").select("*").eq("tenant_id",tenant.id).maybeSingle();
+    if (subQ.error) throw subQ.error;
     const daysLeft = Math.max(0,Math.ceil((new Date(tenant.trial_ends_at).getTime()-Date.now())/86400000));
     return json(req,{ok:true,bot:sanitizeBotInfo(me?.result),auto_reply_enabled:autoEnabled,
       business_connected:(connectionRows.data??[]).length>0,access,
@@ -1328,6 +1612,13 @@ async function publicApi(req:Request, action:string, supabase:any, botToken:stri
         max_media_items:p.max_media_items,features:p.features
       })),
       referral,
+      subscription:subQ.data ? {
+        plan_code:subQ.data.plan_code,
+        provider:subQ.data.provider,
+        status:subQ.data.status,
+        current_period_end:subQ.data.current_period_end,
+        auto_renew_enabled:subQ.data.auto_renew_enabled
+      } : null,
       stats:{rules:rulesCount.count??0,seen_chats:seenCount.count??0,replies:logsCount.count??0,
         media:mediaCount.count??0,pending_reviews:reviewCount.count??0}});
   }
@@ -1364,6 +1655,110 @@ async function publicApi(req:Request, action:string, supabase:any, botToken:stri
       return json(req,{ok:false,error:"invalid_setting"},400);
     await setTenantSetting(supabase,tenant.id,"auto_reply_enabled",body.value);
     return json(req,{ok:true,auto_reply_enabled:body.value});
+  }
+
+  if (action === "invoice" && req.method === "POST") {
+    if (tenant.is_platform_owner) return json(req,{ok:false,error:"owner_free_forever"},400);
+    const access = await getTenantAccess(supabase,tenant);
+    if (access.source === "trial") return json(req,{ok:false,error:"trial_still_active",expires_at:access.expires_at},409);
+    if (access.source === "referral_bonus") return json(req,{ok:false,error:"referral_bonus_active",expires_at:access.expires_at},409);
+
+    const body = await req.json();
+    const planCode = String(body?.plan_code ?? "");
+    if (!["basic","pro"].includes(planCode)) return json(req,{ok:false,error:"invalid_plan"},400);
+
+    const planQ = await supabase.from("telegram_plans").select("*")
+      .eq("code",planCode).eq("is_active",true).maybeSingle();
+    if (planQ.error) throw planQ.error;
+    if (!planQ.data) return json(req,{ok:false,error:"plan_not_available"},404);
+
+    try {
+      const invoice = await createTelegramStarsInvoice(supabase,tenant,planQ.data,botToken);
+      return json(req,{ok:true,...invoice,plan_code:planCode});
+    } catch (error) {
+      const message = String(error?.message ?? error);
+      const known = ["stars_price_not_configured","already_subscribed","active_subscription_exists"];
+      if (known.includes(message)) return json(req,{ok:false,error:message},409);
+      throw error;
+    }
+  }
+
+  if (action === "cancel_subscription" && req.method === "POST") {
+    if (tenant.is_platform_owner) return json(req,{ok:false,error:"owner_free_forever"},400);
+
+    const subQ = await supabase.from("telegram_subscriptions").select("*")
+      .eq("tenant_id",tenant.id).maybeSingle();
+    if (subQ.error) throw subQ.error;
+    const sub = subQ.data;
+
+    if (!sub || sub.provider !== "telegram_stars" || !sub.telegram_payment_charge_id)
+      return json(req,{ok:false,error:"no_star_subscription"},404);
+
+    if (!sub.auto_renew_enabled)
+      return json(req,{ok:true,already_canceled:true,current_period_end:sub.current_period_end});
+
+    await telegram("editUserStarSubscription",{
+      user_id:Number(tenant.telegram_user_id),
+      telegram_payment_charge_id:sub.telegram_payment_charge_id,
+      is_canceled:true
+    },botToken);
+
+    await supabase.from("telegram_subscriptions").update({
+      auto_renew_enabled:false,
+      canceled_at:new Date().toISOString(),
+      updated_at:new Date().toISOString()
+    }).eq("tenant_id",tenant.id);
+
+    return json(req,{ok:true,current_period_end:sub.current_period_end});
+  }
+
+  if (action === "resume_subscription" && req.method === "POST") {
+    if (tenant.is_platform_owner) return json(req,{ok:false,error:"owner_free_forever"},400);
+
+    const subQ = await supabase.from("telegram_subscriptions").select("*")
+      .eq("tenant_id",tenant.id).maybeSingle();
+    if (subQ.error) throw subQ.error;
+    const sub = subQ.data;
+
+    if (!sub || sub.provider !== "telegram_stars" || !sub.telegram_payment_charge_id)
+      return json(req,{ok:false,error:"no_star_subscription"},404);
+
+    if (sub.auto_renew_enabled) return json(req,{ok:true,already_enabled:true});
+
+    await telegram("editUserStarSubscription",{
+      user_id:Number(tenant.telegram_user_id),
+      telegram_payment_charge_id:sub.telegram_payment_charge_id,
+      is_canceled:false
+    },botToken);
+
+    await supabase.from("telegram_subscriptions").update({
+      auto_renew_enabled:true,
+      canceled_at:null,
+      updated_at:new Date().toISOString()
+    }).eq("tenant_id",tenant.id);
+
+    return json(req,{ok:true});
+  }
+
+  if (action === "owner_plan_prices" && req.method === "POST") {
+    if (!tenant.is_platform_owner) return json(req,{ok:false,error:"forbidden"},403);
+    const body = await req.json();
+    const basic = Number(body?.basic_stars);
+    const pro = Number(body?.pro_stars);
+
+    if (!Number.isInteger(basic) || basic < 1 || basic > 10000 ||
+        !Number.isInteger(pro) || pro < 1 || pro > 10000 || pro <= basic) {
+      return json(req,{ok:false,error:"invalid_stars_prices"},400);
+    }
+
+    const a = await supabase.from("telegram_plans")
+      .update({stars_price:basic,updated_at:new Date().toISOString()}).eq("code","basic");
+    if (a.error) throw a.error;
+    const b = await supabase.from("telegram_plans")
+      .update({stars_price:pro,updated_at:new Date().toISOString()}).eq("code","pro");
+    if (b.error) throw b.error;
+
+    return json(req,{ok:true,basic_stars:basic,pro_stars:pro});
   }
 
   if (action === "owner_stats" && req.method === "GET") {
@@ -1561,6 +1956,21 @@ Deno.serve(async (req: Request) => {
             : "✅ Auto Replyer Bot is now connected to your Telegram profile. Your private rules can start working."
         },botToken);
       }
+      return json(req,{ok:true});
+    }
+
+    if (update?.pre_checkout_query) {
+      await handleStarsPreCheckout(update.pre_checkout_query,supabase,botToken);
+      return json(req,{ok:true});
+    }
+
+    if (update?.subscription) {
+      await handleStarsSubscriptionUpdate(update,supabase);
+      return json(req,{ok:true});
+    }
+
+    if (update?.message?.successful_payment) {
+      await activateStarsPayment(update.message,supabase,botToken);
       return json(req,{ok:true});
     }
 
