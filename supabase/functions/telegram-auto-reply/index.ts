@@ -426,6 +426,26 @@ async function handleDirectBotMessage(message: any, supabase: any, botToken: str
   }
 
   if (text.toLowerCase().startsWith("/upload")) {
+    const access = await getTenantAccess(supabase,tenant);
+    if (!access.allowed || access.level !== "pro") {
+      await telegram("sendMessage",{chat_id:message.chat.id,
+        text:"🔒 Media replies are a Pro feature. Your 30-day trial includes Pro; after it ends, activate Pro or a referral bonus hour to save/use media."
+      },botToken);
+      return;
+    }
+    if (!tenant.is_platform_owner) {
+      const countQ = await supabase.from("telegram_media_library")
+        .select("*",{count:"exact",head:true}).eq("tenant_id",tenant.id).eq("enabled",true);
+      if (countQ.error) throw countQ.error;
+      const plan = await getPlanRecord(supabase,"pro");
+      const maxMedia = Number(plan?.max_media_items ?? 5);
+      if ((countQ.count ?? 0) >= maxMedia) {
+        await telegram("sendMessage",{chat_id:message.chat.id,
+          text:"You have reached the Pro media limit of "+maxMedia+" saved items. Delete/disable an old media item before adding another."
+        },botToken);
+        return;
+      }
+    }
     const name = text.slice(7).trim();
     if (!name) {
       await telegram("sendMessage", { chat_id: message.chat.id, text: "Use /upload followed by a name. Example: /upload Welcome Voice" }, botToken);
@@ -687,7 +707,7 @@ async function ensureTenant(supabase: any, user: any) {
         display_name: name,
         username,
         subscription_status: "trial",
-        plan_code: "starter",
+        plan_code: "basic",
       })
       .select()
       .single();
@@ -696,7 +716,7 @@ async function ensureTenant(supabase: any, user: any) {
 
     await supabase.from("telegram_subscriptions").insert({
       tenant_id: tenant.id,
-      plan_code: "starter",
+      plan_code: "basic",
       status: "trial",
       trial_end: tenant.trial_ends_at,
     });
@@ -764,13 +784,158 @@ async function tenantForConnection(supabase: any, connectionId: string, botToken
   return { tenant, connection: upserted.data };
 }
 
-async function tenantAccessAllowed(supabase: any, tenant: any) {
-  if (tenant?.is_platform_owner) return true;
+async function getTenantAccess(supabase: any, tenant: any) {
+  if (tenant?.is_platform_owner) {
+    return { allowed:true, level:"pro", source:"owner", expires_at:null, features:"all" };
+  }
+
   const enforcement = await getSetting(supabase, "billing_enforcement_enabled");
-  if (enforcement !== true) return true;
-  if (tenant?.subscription_status === "active") return true;
-  return tenant?.subscription_status === "trial" &&
-    new Date(tenant.trial_ends_at).getTime() > Date.now();
+  if (enforcement !== true) {
+    return { allowed:true, level:"pro", source:"billing_disabled", expires_at:null, features:"all" };
+  }
+
+  const now = Date.now();
+  if (tenant?.subscription_status === "trial" && new Date(tenant.trial_ends_at).getTime() > now) {
+    return { allowed:true, level:"pro", source:"trial", expires_at:tenant.trial_ends_at, features:"all" };
+  }
+
+  const subscriptionQ = await supabase.from("telegram_subscriptions")
+    .select("*").eq("tenant_id",tenant.id).maybeSingle();
+  if (subscriptionQ.error) throw subscriptionQ.error;
+  const sub = subscriptionQ.data;
+
+  if (tenant?.subscription_status === "active" && sub?.status === "active") {
+    const stillCurrent = !sub.current_period_end || new Date(sub.current_period_end).getTime() > now;
+    if (stillCurrent) {
+      const code = tenant.plan_code === "pro" ? "pro" : "basic";
+      return { allowed:true, level:code, source:"subscription", expires_at:sub.current_period_end ?? null, features:code };
+    }
+  }
+
+  if (tenant?.referral_bonus_until && new Date(tenant.referral_bonus_until).getTime() > now) {
+    return { allowed:true, level:"pro", source:"referral_bonus", expires_at:tenant.referral_bonus_until, features:"all" };
+  }
+
+  return { allowed:false, level:"locked", source:"expired", expires_at:null, features:"none" };
+}
+
+function ruleAllowedForAccess(rule:any, access:any) {
+  if (!access?.allowed) return false;
+  if (access.level === "pro") return true;
+  if (access.level !== "basic") return false;
+
+  const basicTriggers = new Set(["new_chat","exact","contains","starts_with","ends_with","default"]);
+  if (!basicTriggers.has(String(rule.match_type))) return false;
+  if (String(rule.reply_type || "text") !== "text") return false;
+  if (rule.notify_admin) return false;
+  if (rule.next_rule_id) return false;
+  if (rule.media_id) return false;
+  return true;
+}
+
+async function getPlanRecord(supabase:any, code:string) {
+  const q = await supabase.from("telegram_plans").select("*").eq("code",code).maybeSingle();
+  if (q.error) throw q.error;
+  return q.data;
+}
+
+async function getReferralSummary(supabase:any, tenant:any) {
+  const [allQ, qualQ] = await Promise.all([
+    supabase.from("telegram_referrals").select("*",{count:"exact",head:true}).eq("referrer_tenant_id",tenant.id),
+    supabase.from("telegram_referrals").select("*",{count:"exact",head:true}).eq("referrer_tenant_id",tenant.id).eq("status","qualified")
+  ]);
+  if (allQ.error) throw allQ.error;
+  if (qualQ.error) throw qualQ.error;
+  return {
+    code: tenant.referral_code,
+    link: "https://t.me/Auto_replyerbot?start=ref_" + tenant.referral_code,
+    total_referrals: allQ.count ?? 0,
+    qualified_referrals: qualQ.count ?? 0,
+    bonus_seconds_balance: Number(tenant.referral_bonus_seconds ?? 0),
+    bonus_until: tenant.referral_bonus_until ?? null,
+  };
+}
+
+async function awardReferralBonuses(supabase:any, referrerTenantId:string) {
+  const perHour = Number(await getSetting(supabase,"referrals_per_bonus_hour") ?? 2);
+  const secondsPerReward = Number(await getSetting(supabase,"referral_bonus_seconds_per_reward") ?? 3600);
+  if (perHour < 1 || secondsPerReward < 1) return;
+
+  while (true) {
+    const q = await supabase.from("telegram_referrals")
+      .select("id").eq("referrer_tenant_id",referrerTenantId)
+      .eq("status","qualified").eq("bonus_awarded",false)
+      .order("qualified_at",{ascending:true}).limit(perHour);
+    if (q.error) throw q.error;
+    const rows = q.data ?? [];
+    if (rows.length < perHour) break;
+
+    const ids = rows.map((r:any)=>r.id);
+    const upd = await supabase.from("telegram_referrals")
+      .update({bonus_awarded:true}).in("id",ids).eq("referrer_tenant_id",referrerTenantId);
+    if (upd.error) throw upd.error;
+
+    const tenantQ = await supabase.from("telegram_tenants")
+      .select("referral_bonus_seconds").eq("id",referrerTenantId).maybeSingle();
+    if (tenantQ.error) throw tenantQ.error;
+    const nextSeconds = Number(tenantQ.data?.referral_bonus_seconds ?? 0) + secondsPerReward;
+
+    const tUpd = await supabase.from("telegram_tenants")
+      .update({referral_bonus_seconds:nextSeconds,updated_at:new Date().toISOString()})
+      .eq("id",referrerTenantId);
+    if (tUpd.error) throw tUpd.error;
+
+    await supabase.from("telegram_referral_bonus_events").insert({
+      tenant_id:referrerTenantId,seconds_added:secondsPerReward,
+      reason:"qualified_referrals",source_referral_ids:ids
+    });
+  }
+}
+
+async function linkReferralFromStart(supabase:any, tenant:any, startText:string) {
+  const match = String(startText||"").match(/^\/start\s+ref_([A-Za-z0-9]+)$/i);
+  if (!match || tenant.is_platform_owner) return;
+  const code = match[1].toUpperCase();
+
+  const referrerQ = await supabase.from("telegram_tenants")
+    .select("id,referral_code").eq("referral_code",code).maybeSingle();
+  if (referrerQ.error) throw referrerQ.error;
+  if (!referrerQ.data || referrerQ.data.id === tenant.id) return;
+
+  const existing = await supabase.from("telegram_referrals")
+    .select("id").eq("referred_tenant_id",tenant.id).maybeSingle();
+  if (existing.error) throw existing.error;
+  if (existing.data) return;
+
+  await supabase.from("telegram_referrals").insert({
+    referrer_tenant_id:referrerQ.data.id,
+    referred_tenant_id:tenant.id,
+    referral_code:code,
+    status:"pending"
+  });
+}
+
+async function tryQualifyReferral(supabase:any, tenant:any) {
+  if (!tenant || tenant.is_platform_owner || !tenant.pin_hash) return;
+  const connQ = await supabase.from("telegram_business_connections")
+    .select("business_connection_id").eq("tenant_id",tenant.id).eq("is_enabled",true).limit(1);
+  if (connQ.error) throw connQ.error;
+  if (!(connQ.data??[]).length) return;
+
+  const refQ = await supabase.from("telegram_referrals")
+    .select("*").eq("referred_tenant_id",tenant.id).eq("status","pending").maybeSingle();
+  if (refQ.error) throw refQ.error;
+  if (!refQ.data) return;
+
+  const upd = await supabase.from("telegram_referrals")
+    .update({status:"qualified",qualified_at:new Date().toISOString()})
+    .eq("id",refQ.data.id).eq("status","pending");
+  if (upd.error) throw upd.error;
+  await awardReferralBonuses(supabase,refQ.data.referrer_tenant_id);
+}
+
+async function tenantAccessAllowed(supabase:any, tenant:any) {
+  return (await getTenantAccess(supabase,tenant)).allowed;
 }
 
 async function v3SendRuleReply(rule: any, tenantId: string, connectionId: string, chatId: number, supabase: any, botToken: string) {
@@ -897,9 +1062,10 @@ async function v3HandleDirectBotMessage(message:any, supabase:any, botToken:stri
   const media = getIncomingMedia(message);
 
   if (text === "/start" || text.startsWith("/start ")) {
+    await linkReferralFromStart(supabase,tenant,text);
     await telegram("sendMessage",{
       chat_id:message.chat.id,
-      text:"👋 Welcome to Auto Replyer Bot.\n\nYour account is ready with a 30-day free trial. Connect this bot from Telegram Settings > Chat Automation, then open your private dashboard to create a PIN and rules.\n\nPremium is not required for connected business bots.\n\nYou can also send or forward voice notes, photos, videos, audio or documents here and save them with /upload Name.",
+      text:"👋 Welcome to Auto Replyer Bot.\n\nYour account starts with a 30-day full-access trial. After the trial: Basic is ₦1,000/month and Pro is ₦2,000/month.\n\nConnect this bot from Telegram Settings > Chat Automation, then open your private dashboard to create a PIN and rules. Premium is not required.\n\nReferral bonus: every 2 qualified referrals earns 1 hour of full Pro access when your paid/trial access is inactive.",
       reply_markup:{inline_keyboard:[
         [{text:"⚙️ Open My Dashboard",web_app:{url:DASHBOARD_URL}}],
         [{text:"📖 Media Library",callback_data:"open_library"}]
@@ -929,6 +1095,26 @@ async function v3HandleDirectBotMessage(message:any, supabase:any, botToken:stri
   }
 
   if (text.toLowerCase().startsWith("/upload")) {
+    const access = await getTenantAccess(supabase,tenant);
+    if (!access.allowed || access.level !== "pro") {
+      await telegram("sendMessage",{chat_id:message.chat.id,
+        text:"🔒 Media replies are available on Pro. Your 30-day trial and referral bonus hours include Pro access."
+      },botToken);
+      return;
+    }
+    if (!tenant.is_platform_owner) {
+      const countQ = await supabase.from("telegram_media_library")
+        .select("*",{count:"exact",head:true}).eq("tenant_id",tenant.id).eq("enabled",true);
+      if (countQ.error) throw countQ.error;
+      const proPlan = await getPlanRecord(supabase,"pro");
+      const maxMedia = Number(proPlan?.max_media_items ?? 5);
+      if ((countQ.count ?? 0) >= maxMedia) {
+        await telegram("sendMessage",{chat_id:message.chat.id,
+          text:"You have reached your Pro limit of "+maxMedia+" saved media items."
+        },botToken);
+        return;
+      }
+    }
     const name = text.slice(7).trim();
     if (!name) {
       await telegram("sendMessage",{chat_id:message.chat.id,text:"Use /upload followed by a name. Example: /upload Welcome Voice"},botToken);
@@ -1036,17 +1222,29 @@ async function publicApi(req:Request, action:string, supabase:any, botToken:stri
     if (connections.error) throw connections.error;
 
     if (action === "bootstrap") {
-      const plan = await supabase.from("telegram_plans").select("*").eq("code",tenant.plan_code).maybeSingle();
+      const [basicPlanQ,proPlanQ] = await Promise.all([
+        supabase.from("telegram_plans").select("*").eq("code","basic").maybeSingle(),
+        supabase.from("telegram_plans").select("*").eq("code","pro").maybeSingle()
+      ]);
+      if (basicPlanQ.error) throw basicPlanQ.error;
+      if (proPlanQ.error) throw proPlanQ.error;
       const daysLeft = Math.max(0,Math.ceil((new Date(tenant.trial_ends_at).getTime()-Date.now())/86400000));
+      const access = await getTenantAccess(supabase,tenant);
+      const referral = await getReferralSummary(supabase,tenant);
       return json(req,{ok:true,needs_pin:!tenant.pin_hash,user:{
         id:user.id,first_name:user.first_name||"",username:user.username||null
       },tenant:{
         id:tenant.id,display_name:tenant.display_name,subscription_status:tenant.subscription_status,
         trial_ends_at:tenant.trial_ends_at,trial_days_left:daysLeft,is_platform_owner:tenant.is_platform_owner,
         business_connected:(connections.data??[]).length>0,
-        plan:plan.data?{code:plan.data.code,name:plan.data.name,currency:plan.data.currency,
-          monthly_price_minor:plan.data.monthly_price_minor,trial_days:plan.data.trial_days}:null
-      }});
+        plan_code:tenant.plan_code,access
+      },
+      plans:[basicPlanQ.data,proPlanQ.data].filter(Boolean).map((p:any)=>({
+        code:p.code,name:p.name,currency:p.currency,monthly_price_minor:p.monthly_price_minor,
+        usd_price_cents:p.usd_price_cents,stars_price:p.stars_price,trial_days:p.trial_days,
+        max_media_items:p.max_media_items,features:p.features
+      })),
+      referral});
     }
 
     const pin = String(body?.pin ?? "");
@@ -1056,6 +1254,8 @@ async function publicApi(req:Request, action:string, supabase:any, botToken:stri
       if (tenant.pin_hash) return json(req,{ok:false,error:"pin_already_set"},409);
       const hashed = await hashPin(pin);
       await supabase.from("telegram_tenants").update({pin_hash:hashed,updated_at:new Date().toISOString()}).eq("id",tenant.id);
+      tenant.pin_hash = hashed;
+      await tryQualifyReferral(supabase,tenant);
       const token = await makeSession(tenant.id,Number(user.id),masterSecret);
       return json(req,{ok:true,token});
     }
@@ -1101,7 +1301,7 @@ async function publicApi(req:Request, action:string, supabase:any, botToken:stri
   if (!tenant) return json(req,{ok:false,error:"tenant_not_found"},404);
 
   if (action === "status" && req.method === "GET") {
-    const [me, rulesCount, seenCount, logsCount, mediaCount, reviewCount, connectionRows] = await Promise.all([
+    const [me, rulesCount, seenCount, logsCount, mediaCount, reviewCount, connectionRows, basicPlanQ, proPlanQ] = await Promise.all([
       telegram("getMe",{},botToken),
       supabase.from("telegram_auto_reply_rules").select("*",{count:"exact",head:true}).eq("tenant_id",tenant.id),
       supabase.from("telegram_seen_chats").select("*",{count:"exact",head:true}).eq("tenant_id",tenant.id),
@@ -1109,13 +1309,25 @@ async function publicApi(req:Request, action:string, supabase:any, botToken:stri
       supabase.from("telegram_media_library").select("*",{count:"exact",head:true}).eq("tenant_id",tenant.id),
       supabase.from("telegram_review_queue").select("*",{count:"exact",head:true}).eq("tenant_id",tenant.id).eq("status","pending"),
       supabase.from("telegram_business_connections").select("*").eq("tenant_id",tenant.id).eq("is_enabled",true),
+      supabase.from("telegram_plans").select("*").eq("code","basic").maybeSingle(),
+      supabase.from("telegram_plans").select("*").eq("code","pro").maybeSingle()
     ]);
     const autoEnabled = await getTenantSetting(supabase,tenant.id,"auto_reply_enabled",true);
+    const access = await getTenantAccess(supabase,tenant);
+    const referral = await getReferralSummary(supabase,tenant);
     const daysLeft = Math.max(0,Math.ceil((new Date(tenant.trial_ends_at).getTime()-Date.now())/86400000));
     return json(req,{ok:true,bot:sanitizeBotInfo(me?.result),auto_reply_enabled:autoEnabled,
-      business_connected:(connectionRows.data??[]).length>0,
+      business_connected:(connectionRows.data??[]).length>0,access,
       tenant:{display_name:tenant.display_name,subscription_status:tenant.subscription_status,
-        trial_ends_at:tenant.trial_ends_at,trial_days_left:daysLeft,is_platform_owner:tenant.is_platform_owner},
+        trial_ends_at:tenant.trial_ends_at,trial_days_left:daysLeft,is_platform_owner:tenant.is_platform_owner,
+        plan_code:tenant.plan_code,referral_bonus_until:tenant.referral_bonus_until,
+        referral_bonus_seconds:Number(tenant.referral_bonus_seconds??0)},
+      plans:[basicPlanQ.data,proPlanQ.data].filter(Boolean).map((p:any)=>({
+        code:p.code,name:p.name,currency:p.currency,monthly_price_minor:p.monthly_price_minor,
+        usd_price_cents:p.usd_price_cents,stars_price:p.stars_price,trial_days:p.trial_days,
+        max_media_items:p.max_media_items,features:p.features
+      })),
+      referral,
       stats:{rules:rulesCount.count??0,seen_chats:seenCount.count??0,replies:logsCount.count??0,
         media:mediaCount.count??0,pending_reviews:reviewCount.count??0}});
   }
@@ -1154,13 +1366,72 @@ async function publicApi(req:Request, action:string, supabase:any, botToken:stri
     return json(req,{ok:true,auto_reply_enabled:body.value});
   }
 
+  if (action === "owner_stats" && req.method === "GET") {
+    if (!tenant.is_platform_owner) return json(req,{ok:false,error:"forbidden"},403);
+    const [tenantsQ,trialsQ,activeQ,qualifiedQ,bonusQ] = await Promise.all([
+      supabase.from("telegram_tenants").select("*",{count:"exact",head:true}),
+      supabase.from("telegram_tenants").select("*",{count:"exact",head:true}).eq("subscription_status","trial"),
+      supabase.from("telegram_tenants").select("*",{count:"exact",head:true}).eq("subscription_status","active"),
+      supabase.from("telegram_referrals").select("*",{count:"exact",head:true}).eq("status","qualified"),
+      supabase.from("telegram_referral_bonus_events").select("seconds_added")
+    ]);
+    if (tenantsQ.error) throw tenantsQ.error;
+    if (trialsQ.error) throw trialsQ.error;
+    if (activeQ.error) throw activeQ.error;
+    if (qualifiedQ.error) throw qualifiedQ.error;
+    if (bonusQ.error) throw bonusQ.error;
+    const bonusSeconds = (bonusQ.data??[]).reduce((n:number,r:any)=>n+Number(r.seconds_added??0),0);
+    return json(req,{ok:true,stats:{
+      total_users:Math.max(0,(tenantsQ.count??0)-1),
+      trial_users:Math.max(0,(trialsQ.count??0)-(tenant.subscription_status==="trial"?1:0)),
+      active_paid_or_owner:activeQ.count??0,
+      qualified_referrals:qualifiedQ.count??0,
+      referral_bonus_hours_issued:Math.floor(bonusSeconds/3600)
+    }});
+  }
+
+  if (action === "referral_claim" && req.method === "POST") {
+    if (tenant.is_platform_owner) return json(req,{ok:false,error:"owner_does_not_need_bonus"},400);
+    const currentAccess = await getTenantAccess(supabase,tenant);
+    if (currentAccess.allowed && currentAccess.source !== "referral_bonus") {
+      return json(req,{ok:false,error:"normal_access_still_active"},409);
+    }
+    if (currentAccess.source === "referral_bonus") {
+      return json(req,{ok:false,error:"bonus_already_active",expires_at:currentAccess.expires_at},409);
+    }
+
+    const freshQ = await supabase.from("telegram_tenants").select("*").eq("id",tenant.id).maybeSingle();
+    if (freshQ.error) throw freshQ.error;
+    const fresh = freshQ.data;
+    const available = Number(fresh?.referral_bonus_seconds ?? 0);
+    if (available < 3600) return json(req,{ok:false,error:"not_enough_referral_bonus"},400);
+
+    const until = new Date(Date.now()+3600_000).toISOString();
+    const q = await supabase.from("telegram_tenants").update({
+      referral_bonus_seconds:available-3600,
+      referral_bonus_until:until,
+      updated_at:new Date().toISOString()
+    }).eq("id",tenant.id);
+    if (q.error) throw q.error;
+    return json(req,{ok:true,bonus_until:until,remaining_seconds:available-3600});
+  }
+
   if (action === "rule" && req.method === "POST") {
     const body = await req.json();
     const operation = String(body?.action ?? "");
     const id = Number(body?.id);
+    const access = await getTenantAccess(supabase,tenant);
 
     if (operation === "toggle") {
       if (!Number.isFinite(id) || typeof body?.enabled !== "boolean") return json(req,{ok:false,error:"invalid_rule"},400);
+      if (body.enabled) {
+        if (!access.allowed) return json(req,{ok:false,error:"subscription_required"},402);
+        const owned = await supabase.from("telegram_auto_reply_rules").select("*")
+          .eq("id",id).eq("tenant_id",tenant.id).maybeSingle();
+        if (owned.error) throw owned.error;
+        if (!owned.data) return json(req,{ok:false,error:"rule_not_found"},404);
+        if (!ruleAllowedForAccess(owned.data,access)) return json(req,{ok:false,error:"upgrade_to_pro"},403);
+      }
       const q = await supabase.from("telegram_auto_reply_rules")
         .update({enabled:body.enabled,updated_at:new Date().toISOString()})
         .eq("id",id).eq("tenant_id",tenant.id);
@@ -1182,6 +1453,15 @@ async function publicApi(req:Request, action:string, supabase:any, botToken:stri
       const mediaId = body?.media_id ? String(body.media_id) : null;
       if (!MATCH_TYPES.has(matchType) || !REPLY_TYPES.has(replyType))
         return json(req,{ok:false,error:"invalid_rule"},400);
+      if (!access.allowed) return json(req,{ok:false,error:"subscription_required"},402);
+
+      const requestedRule = {
+        match_type:matchType,reply_type:replyType,media_id:mediaId,
+        next_rule_id:body?.next_rule_id ? Number(body.next_rule_id) : null,
+        notify_admin:body?.notify_admin===true
+      };
+      if (!ruleAllowedForAccess(requestedRule,access))
+        return json(req,{ok:false,error:"upgrade_to_pro"},403);
       if (replyType === "text" && !replyText && !body?.notify_admin)
         return json(req,{ok:false,error:"reply_required"},400);
 
@@ -1268,6 +1548,11 @@ Deno.serve(async (req: Request) => {
         telegram_user_id:Number(bc.user.id), is_enabled:bc.is_enabled !== false,
         rights:bc.rights || null, updated_at:new Date().toISOString()
       });
+      if (bc.is_enabled !== false) {
+        const freshTenantQ = await supabase.from("telegram_tenants").select("*").eq("id",tenant.id).maybeSingle();
+        if (freshTenantQ.error) throw freshTenantQ.error;
+        await tryQualifyReferral(supabase,freshTenantQ.data);
+      }
       const notifyChat = await getTenantSetting(supabase,tenant.id,"notification_chat_id",null);
       if (notifyChat) {
         await telegram("sendMessage",{chat_id:notifyChat,
@@ -1301,7 +1586,8 @@ Deno.serve(async (req: Request) => {
     const tenant = resolved.tenant;
     const connectionId = String(message.business_connection_id);
 
-    if (!(await tenantAccessAllowed(supabase,tenant)))
+    const access = await getTenantAccess(supabase,tenant);
+    if (!access.allowed)
       return json(req,{ok:true,skipped:"subscription_inactive"});
 
     const enabled = await getTenantSetting(supabase,tenant.id,"auto_reply_enabled",true);
@@ -1329,7 +1615,7 @@ Deno.serve(async (req: Request) => {
           const ruleQ = await supabase.from("telegram_auto_reply_rules").select("*")
             .eq("id",expectation.source_rule_id).eq("tenant_id",tenant.id).eq("enabled",true).maybeSingle();
           if (ruleQ.error) throw ruleQ.error;
-          if (ruleQ.data?.notify_admin) {
+          if (ruleQ.data?.notify_admin && ruleAllowedForAccess(ruleQ.data,access)) {
             await v3NotifyReview(ruleQ.data,tenant,message,media,connectionId,supabase,botToken);
             await supabase.from("telegram_review_expectations").delete()
               .eq("tenant_id",tenant.id).eq("business_connection_id",connectionId).eq("chat_id",chatId);
@@ -1366,7 +1652,7 @@ Deno.serve(async (req: Request) => {
         const nextQ = await supabase.from("telegram_auto_reply_rules").select("*")
           .eq("id",stateQ.data.next_rule_id).eq("tenant_id",tenant.id).eq("enabled",true).maybeSingle();
         if (nextQ.error) throw nextQ.error;
-        if (nextQ.data) matchedRule = nextQ.data;
+        if (nextQ.data && ruleAllowedForAccess(nextQ.data,access)) matchedRule = nextQ.data;
       }
       await supabase.from("telegram_conversation_states").delete()
         .eq("tenant_id",tenant.id).eq("business_connection_id",connectionId).eq("chat_id",chatId);
@@ -1379,6 +1665,7 @@ Deno.serve(async (req: Request) => {
       if (rulesQ.error) throw rulesQ.error;
       for (const rule of rulesQ.data ?? []) {
         if (rule.match_type === "flow_step") continue;
+        if (!ruleAllowedForAccess(rule,access)) continue;
         const trigger = normalizeMessageText(rule.trigger_text);
         const matches =
           (rule.match_type === "new_chat" && isNewChat) ||
