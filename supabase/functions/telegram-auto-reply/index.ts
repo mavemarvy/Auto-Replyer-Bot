@@ -396,6 +396,14 @@ async function handleDirectBotMessage(message: any, supabase: any, botToken: str
     return;
   }
 
+  if (text === "/help") {
+    await telegram("sendMessage",{
+      chat_id:message.chat.id,
+      text:"Auto Replyer Bot commands:\n\n/start — create/open your account\n/dashboard — open your private dashboard\n/library — list your saved media\n/upload Name — save the last media you sent\n/cancel — discard a pending media upload\n/resetpin — reset your dashboard PIN\n\nTo let the bot answer your personal chats, go to Telegram Settings > Chat Automation and connect @Auto_replyerbot."
+    },botToken);
+    return;
+  }
+
   if (text === "/library") {
     const { data, error } = await supabase
       .from("telegram_media_library")
@@ -891,7 +899,7 @@ async function v3HandleDirectBotMessage(message:any, supabase:any, botToken:stri
   if (text === "/start" || text.startsWith("/start ")) {
     await telegram("sendMessage",{
       chat_id:message.chat.id,
-      text:"👋 Welcome to Auto Replyer Bot.\n\nYour account is ready with a 30-day free trial. Connect this bot to your Telegram profile/business automation, then open your private dashboard to create a PIN and rules.\n\nPremium is not required for connected business bots.\n\nYou can also send or forward voice notes, photos, videos, audio or documents here and save them with /upload Name.",
+      text:"👋 Welcome to Auto Replyer Bot.\n\nYour account is ready with a 30-day free trial. Connect this bot from Telegram Settings > Chat Automation, then open your private dashboard to create a PIN and rules.\n\nPremium is not required for connected business bots.\n\nYou can also send or forward voice notes, photos, videos, audio or documents here and save them with /upload Name.",
       reply_markup:{inline_keyboard:[
         [{text:"⚙️ Open My Dashboard",web_app:{url:DASHBOARD_URL}}],
         [{text:"📖 Media Library",callback_data:"open_library"}]
@@ -1052,7 +1060,35 @@ async function publicApi(req:Request, action:string, supabase:any, botToken:stri
       return json(req,{ok:true,token});
     }
 
-    if (!(await verifyPin(pin,tenant.pin_hash))) return json(req,{ok:false,error:"invalid_pin"},401);
+    const securityQ = await supabase.from("telegram_auth_security")
+      .select("*").eq("tenant_id",tenant.id).maybeSingle();
+    if (securityQ.error) throw securityQ.error;
+    const security = securityQ.data;
+    if (security?.locked_until && new Date(security.locked_until).getTime() > Date.now()) {
+      const retry = Math.max(1,Math.ceil((new Date(security.locked_until).getTime()-Date.now())/1000));
+      return json(req,{ok:false,error:"pin_locked",retry_after_seconds:retry},429);
+    }
+
+    const validPin = await verifyPin(pin,tenant.pin_hash);
+    if (!validPin) {
+      const baseAttempts = security?.locked_until ? 0 : Number(security?.failed_attempts ?? 0);
+      const failed = baseAttempts + 1;
+      const shouldLock = failed >= 5;
+      const lockedUntil = shouldLock ? new Date(Date.now()+15*60*1000).toISOString() : null;
+      await supabase.from("telegram_auth_security").upsert({
+        tenant_id:tenant.id,
+        failed_attempts:shouldLock ? 0 : failed,
+        locked_until:lockedUntil,
+        last_failed_at:new Date().toISOString(),
+        updated_at:new Date().toISOString()
+      });
+      if (shouldLock) return json(req,{ok:false,error:"pin_locked",retry_after_seconds:900},429);
+      return json(req,{ok:false,error:"invalid_pin",attempts_remaining:5-failed},401);
+    }
+
+    await supabase.from("telegram_auth_security").upsert({
+      tenant_id:tenant.id,failed_attempts:0,locked_until:null,updated_at:new Date().toISOString()
+    });
     const token = await makeSession(tenant.id,Number(user.id),masterSecret);
     return json(req,{ok:true,token});
   }
