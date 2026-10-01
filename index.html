@@ -10,28 +10,27 @@
 <body>
   <div class="bg-orb orb-a"></div>
   <div class="bg-orb orb-b"></div>
-
   <main class="shell">
     <section id="unlockView" class="unlock-wrap">
       <div class="brand-mark">AR</div>
       <h1>Auto Replyer Bot</h1>
       <p class="muted">Secure control panel for your Telegram Business auto replies.</p>
       <form id="unlockForm" class="card unlock-card">
-        <label for="adminSecret">Admin secret</label>
+        <label for="adminSecret">Dashboard secret</label>
         <div class="secret-row">
-          <input id="adminSecret" type="password" autocomplete="current-password" placeholder="Enter TELEGRAM_WEBHOOK_SECRET" required />
-          <button id="showSecret" type="button" class="icon-btn" aria-label="Show secret">Show</button>
+          <input id="adminSecret" type="password" autocomplete="current-password" placeholder="Enter your saved secret" required />
+          <button id="showSecret" type="button" class="icon-btn">Show</button>
         </div>
         <button class="primary full" type="submit">Unlock dashboard</button>
         <p id="unlockError" class="error hidden"></p>
-        <p class="tiny">The secret stays in this browser session only. It is not stored on Vercel.</p>
+        <p class="tiny">Stored only in this browser session.</p>
       </form>
     </section>
 
     <section id="dashboardView" class="hidden">
       <header class="topbar">
         <div>
-          <div class="eyebrow">TELEGRAM BUSINESS</div>
+          <div class="eyebrow">PERSONAL PRO V2</div>
           <h1>Auto Replyer Bot</h1>
           <p id="botIdentity" class="muted">Loading bot status…</p>
         </div>
@@ -52,19 +51,15 @@
         <button id="registerWebhookBtn" class="secondary">Register webhook</button>
       </section>
 
-      <section class="stats-grid">
+      <section class="stats-grid pro-stats">
         <article class="card stat"><span class="stat-label">Rules</span><strong id="statRules">—</strong></article>
         <article class="card stat"><span class="stat-label">People seen</span><strong id="statSeen">—</strong></article>
         <article class="card stat"><span class="stat-label">Replies sent</span><strong id="statReplies">—</strong></article>
+        <article class="card stat"><span class="stat-label">Saved media</span><strong id="statMedia">—</strong></article>
+        <article class="card stat"><span class="stat-label">Pending reviews</span><strong id="statReviews">—</strong></article>
         <article class="card stat switch-card">
-          <div>
-            <span class="stat-label">Auto reply</span>
-            <strong id="autoReplyText">—</strong>
-          </div>
-          <label class="switch">
-            <input id="globalToggle" type="checkbox" />
-            <span class="slider"></span>
-          </label>
+          <div><span class="stat-label">Auto reply</span><strong id="autoReplyText">—</strong></div>
+          <label class="switch"><input id="globalToggle" type="checkbox" /><span class="slider"></span></label>
         </article>
       </section>
 
@@ -72,10 +67,7 @@
         <div class="left-col">
           <section class="card section-card">
             <div class="section-head">
-              <div>
-                <div class="eyebrow">RULE ENGINE</div>
-                <h2 id="ruleFormTitle">Add a reply rule</h2>
-              </div>
+              <div><div class="eyebrow">RULE & FLOW ENGINE</div><h2 id="ruleFormTitle">Add a reply rule</h2></div>
               <button id="cancelEditBtn" class="ghost hidden">Cancel edit</button>
             </div>
 
@@ -83,18 +75,32 @@
               <input id="editingRuleId" type="hidden" />
               <div class="field-grid">
                 <label>
-                  <span>Match type</span>
+                  <span>Trigger</span>
                   <select id="matchType">
-                    <option value="exact">Exact message</option>
-                    <option value="contains">Contains word/text</option>
-                    <option value="starts_with">Starts with</option>
-                    <option value="ends_with">Ends with</option>
-                    <option value="new_chat">New messenger</option>
-                    <option value="default">Default fallback</option>
+                    <optgroup label="Text">
+                      <option value="exact">Exact message</option>
+                      <option value="contains">Contains word/text</option>
+                      <option value="starts_with">Starts with</option>
+                      <option value="ends_with">Ends with</option>
+                    </optgroup>
+                    <optgroup label="Conversation">
+                      <option value="new_chat">New messenger</option>
+                      <option value="flow_step">Flow step — only after another rule</option>
+                      <option value="default">Default fallback</option>
+                    </optgroup>
+                    <optgroup label="Media received">
+                      <option value="photo">Photo/image</option>
+                      <option value="video">Video</option>
+                      <option value="pdf">PDF document</option>
+                      <option value="document">Any document/file</option>
+                      <option value="voice">Voice note</option>
+                      <option value="audio">Audio/music file</option>
+                      <option value="any_media">Any media</option>
+                    </optgroup>
                   </select>
                 </label>
                 <label>
-                  <span>Priority <small style="color:#777;font-weight:500">(lower number runs first)</small></span>
+                  <span>Priority <small class="field-note">(lower runs first)</small></span>
                   <input id="priority" type="number" value="100" min="0" step="1" />
                 </label>
               </div>
@@ -104,16 +110,51 @@
                 <input id="triggerText" type="text" placeholder="e.g. price" />
               </label>
 
+              <div class="divider"></div>
+
+              <div class="field-grid">
+                <label>
+                  <span>Reply type</span>
+                  <select id="replyType">
+                    <option value="text">Text message</option>
+                    <option value="voice">Telegram voice note</option>
+                    <option value="audio">Audio/music</option>
+                    <option value="photo">Photo</option>
+                    <option value="video">Video</option>
+                    <option value="document">Document</option>
+                  </select>
+                </label>
+                <label id="mediaWrap" class="hidden">
+                  <span>Saved media</span>
+                  <select id="mediaId"><option value="">Choose saved media…</option></select>
+                </label>
+              </div>
+
               <label>
-                <span>Automatic reply</span>
-                <textarea id="replyText" rows="5" placeholder="Type the reply Telegram should send…" required></textarea>
+                <span id="replyTextLabel">Automatic reply</span>
+                <textarea id="replyText" rows="5" placeholder="Type the reply Telegram should send…"></textarea>
+                <small id="replyTextHint" class="field-note">For media replies, this becomes the optional caption.</small>
+              </label>
+
+              <div class="divider"></div>
+
+              <label>
+                <span>After this reply, wait for the customer's next message and send</span>
+                <select id="nextRuleId"><option value="">End flow — do nothing automatically</option></select>
+                <small class="field-note">Choose another rule. Flow-step rules are ideal here because they do not trigger by themselves.</small>
               </label>
 
               <label class="check-row">
-                <input id="ruleEnabled" type="checkbox" checked />
-                <span>Enable this rule immediately</span>
+                <input id="notifyAdmin" type="checkbox" />
+                <span>When this rule matches media, send it to my bot chat for review</span>
               </label>
 
+              <div id="reviewOptions" class="review-options hidden">
+                <label><span>Message to customer after I tap Approve</span><textarea id="approvalReplyText" rows="3" placeholder="Optional approval message"></textarea></label>
+                <label><span>Message to customer after I tap Reject</span><textarea id="rejectionReplyText" rows="3" placeholder="Optional rejection message"></textarea></label>
+              </div>
+
+              <label class="check-row"><input id="ruleEnabled" type="checkbox" checked /><span>Enable this rule immediately</span></label>
               <button id="saveRuleBtn" type="submit" class="primary">Add rule</button>
               <p id="ruleFormError" class="error hidden"></p>
             </form>
@@ -121,26 +162,32 @@
 
           <section class="card section-card">
             <div class="section-head">
-              <div>
-                <div class="eyebrow">ACTIVE CONFIGURATION</div>
-                <h2>Your rules</h2>
-              </div>
+              <div><div class="eyebrow">ACTIVE CONFIGURATION</div><h2>Your rules & flow steps</h2></div>
               <span id="ruleCountBadge" class="badge">0</span>
             </div>
-            <div id="rulesList" class="rules-list">
-              <div class="empty">Loading rules…</div>
-            </div>
+            <div id="rulesList" class="rules-list"><div class="empty">Loading rules…</div></div>
           </section>
         </div>
 
         <aside class="right-col">
           <section class="card section-card">
-            <div class="section-head">
-              <div>
-                <div class="eyebrow">BOT STATUS</div>
-                <h2>Connection</h2>
-              </div>
+            <div class="section-head"><div><div class="eyebrow">MEDIA LIBRARY</div><h2>Voice, audio & files</h2></div><span id="mediaCountBadge" class="badge">0</span></div>
+            <div class="help-box">
+              <strong>Upload from Telegram</strong>
+              <p>Open <b>@Auto_replyerbot</b>, send or forward a voice note, photo, video, audio or document, then send:</p>
+              <code>/upload Media Name</code>
+              <p>Example: <code>/upload Coach Keshy Introduction</code></p>
             </div>
+            <div id="mediaList" class="media-list"><div class="empty">No saved media yet.</div></div>
+          </section>
+
+          <section class="card section-card">
+            <div class="section-head"><div><div class="eyebrow">VERIFICATION INBOX</div><h2>Recent media reviews</h2></div></div>
+            <div id="reviewsList" class="logs-list"><div class="empty">No reviews yet.</div></div>
+          </section>
+
+          <section class="card section-card">
+            <div class="section-head"><div><div class="eyebrow">BOT STATUS</div><h2>Connection</h2></div></div>
             <dl class="status-list">
               <div><dt>Bot</dt><dd id="statusBot">—</dd></div>
               <div><dt>Business capable</dt><dd id="statusBusiness">—</dd></div>
@@ -151,34 +198,19 @@
           </section>
 
           <section class="card section-card">
-            <div class="section-head">
-              <div>
-                <div class="eyebrow">HISTORY</div>
-                <h2>Recent replies</h2>
-              </div>
-            </div>
-            <div id="logsList" class="logs-list">
-              <div class="empty">No reply history yet.</div>
-            </div>
+            <div class="section-head"><div><div class="eyebrow">HISTORY</div><h2>Recent replies</h2></div></div>
+            <div id="logsList" class="logs-list"><div class="empty">No reply history yet.</div></div>
           </section>
 
           <section class="card section-card danger-zone">
-            <div>
-              <div class="eyebrow">MAINTENANCE</div>
-              <h2>New-chat memory</h2>
-              <p class="muted">Clearing this makes previously seen people count as new again.</p>
-            </div>
+            <div><div class="eyebrow">MAINTENANCE</div><h2>New-chat memory</h2><p class="muted">Clearing this makes previously seen people count as new again.</p></div>
             <button id="resetSeenBtn" class="danger-btn">Reset seen people</button>
           </section>
         </aside>
       </section>
-
-      <footer>
-        Auto Replyer Bot · Supabase Edge Function + Telegram Business
-      </footer>
+      <footer>Auto Replyer Bot Personal Pro v2 · Telegram Business + Supabase</footer>
     </section>
   </main>
-
   <div id="toast" class="toast hidden"></div>
   <script src="/app.js"></script>
 </body>
