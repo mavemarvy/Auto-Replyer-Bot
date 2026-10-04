@@ -319,6 +319,229 @@
     </section>
   </main>
 
+
+  <button id="helpCenterLauncher" class="help-launcher" type="button" aria-controls="helpCenterPanel" aria-expanded="false">
+    <span class="help-launcher-icon">?</span>
+    <span>
+      <strong>Learn how to use Auto Replyer Bot</strong>
+      <small>Help Center & setup guide</small>
+    </span>
+  </button>
+
+  <div id="helpCenterBackdrop" class="help-backdrop hidden"></div>
+
+  <aside id="helpCenterPanel" class="help-center-panel hidden" aria-hidden="true">
+    <div class="help-center-head">
+      <div>
+        <div class="eyebrow">HELP CENTER</div>
+        <h2>Learn Auto Replyer Bot</h2>
+        <p>Tap any question below to see the answer.</p>
+      </div>
+      <button id="helpCenterClose" class="help-close" type="button" aria-label="Close Help Center">×</button>
+    </div>
+
+    <div class="help-search-wrap">
+      <span class="help-search-icon">⌕</span>
+      <input id="helpCenterSearch" type="search" placeholder="Search: media, flow, priority, subscription…" autocomplete="off" />
+    </div>
+
+    <div class="help-quick-grid">
+      <button class="help-quick" type="button" data-help-target="help-start"><span>🚀</span><b>Start here</b><small>New user setup</small></button>
+      <button class="help-quick" type="button" data-help-target="help-rule"><span>💬</span><b>Auto replies</b><small>Create rules</small></button>
+      <button class="help-quick" type="button" data-help-target="help-flow"><span>🔗</span><b>Flows</b><small>A → reply → B</small></button>
+      <button class="help-quick" type="button" data-help-target="help-media"><span>🎙️</span><b>Media</b><small>Voice & files</small></button>
+    </div>
+
+    <div id="helpQuestions" class="help-questions">
+      <details id="help-start" class="help-item" open>
+        <summary><span class="help-q-icon">🚀</span><span><b>I’m new here. How do I get started?</b><small>Complete setup from zero</small></span></summary>
+        <div class="help-answer">
+          <ol>
+            <li>Open <b>@Auto_replyerbot</b> and send <code>/start</code>.</li>
+            <li>Tap <b>Open My Dashboard</b>.</li>
+            <li>Create your private 6–12 digit dashboard PIN.</li>
+            <li>In Telegram, open <b>Settings → Chat Automation</b> and connect <b>@Auto_replyerbot</b>.</li>
+            <li>Return to the dashboard and confirm that <b>Profile connected</b> says Connected.</li>
+            <li>Create your first auto-reply rule and leave <b>Auto reply</b> switched ON.</li>
+          </ol>
+          <p>Your first 30 days include the full Pro feature set.</p>
+        </div>
+      </details>
+
+      <details class="help-item">
+        <summary><span class="help-q-icon">🔌</span><span><b>How do I connect the bot to my Telegram chats?</b><small>Required before replies can work</small></span></summary>
+        <div class="help-answer">
+          <p>Open Telegram <b>Settings → Chat Automation</b>, choose the connected bot/chatbot option, and connect <b>@Auto_replyerbot</b>. Telegram controls which chats the bot may manage. After connecting, reopen or refresh the dashboard.</p>
+        </div>
+      </details>
+
+      <details id="help-rule" class="help-item">
+        <summary><span class="help-q-icon">💬</span><span><b>How do I create a normal text auto-reply?</b><small>Keyword → automatic message</small></span></summary>
+        <div class="help-answer">
+          <ol>
+            <li>Choose a trigger such as <b>Exact message</b> or <b>Contains word/text</b>.</li>
+            <li>Enter the incoming word or message.</li>
+            <li>Choose <b>Text message</b> as the reply type.</li>
+            <li>Type the reply the customer should receive.</li>
+            <li>Tap <b>Add rule</b>.</li>
+          </ol>
+          <p>Example: trigger <code>price</code> using Contains → reply <code>Hello, here is the current price…</code>.</p>
+        </div>
+      </details>
+
+      <details class="help-item">
+        <summary><span class="help-q-icon">🧠</span><span><b>What do Exact, Contains, Starts With and Ends With mean?</b><small>Text matching explained</small></span></summary>
+        <div class="help-answer">
+          <p><b>Exact</b> only matches the full message. <b>Contains</b> matches when your saved text appears anywhere in the message. <b>Starts With</b> checks the beginning. <b>Ends With</b> checks the end. Contains is usually best when customers may add extra words.</p>
+        </div>
+      </details>
+
+      <details class="help-item">
+        <summary><span class="help-q-icon">⚡</span><span><b>What does Priority mean?</b><small>Which rule runs first</small></span></summary>
+        <div class="help-answer">
+          <p><b>Lower numbers run first.</b> Priority 10 is checked before 100, and 100 before 1000. If two rules could match the same message, the first matching rule wins. Put very specific rules above broad fallback rules.</p>
+          <p>Example: product keyword = <b>100</b>, New Messenger = <b>1000</b>, Default fallback = <b>5000</b>.</p>
+        </div>
+      </details>
+
+      <details class="help-item">
+        <summary><span class="help-q-icon">👋</span><span><b>How does New Messenger work?</b><small>Reply to a person’s first message</small></span></summary>
+        <div class="help-answer">
+          <p>A New Messenger rule runs when Auto Replyer Bot has not seen that customer before for your connected account. If you want to test it again with an old customer, use <b>Reset seen people</b> in Maintenance.</p>
+        </div>
+      </details>
+
+      <details id="help-flow" class="help-item">
+        <summary><span class="help-q-icon">🔗</span><span><b>How do I make “Reply A → customer replies anything → Reply B”?</b><small>Conversation flow automation</small></span></summary>
+        <div class="help-answer">
+          <ol>
+            <li>Create Reply B as a rule with trigger <b>Flow step — only after another rule</b>.</li>
+            <li>Create or edit Reply A.</li>
+            <li>Under <b>After this reply, wait for the customer’s next message and send</b>, choose Reply B.</li>
+            <li>Save Reply A.</li>
+          </ol>
+          <p>After Reply A is sent, the customer may type anything. Their next message triggers Reply B. You can chain B → C → D the same way.</p>
+        </div>
+      </details>
+
+      <details id="help-media" class="help-item">
+        <summary><span class="help-q-icon">🎙️</span><span><b>How do I save a voice note, photo, video or file for auto-reply?</b><small>Upload media through the bot</small></span></summary>
+        <div class="help-answer">
+          <ol>
+            <li>Open your private chat with <b>@Auto_replyerbot</b>.</li>
+            <li>Send or forward the voice note, photo, video, audio or document.</li>
+            <li>Then send <code>/upload Your Media Name</code>.</li>
+            <li>Refresh the dashboard. It will appear in <b>My Media Library</b>.</li>
+          </ol>
+          <p>Example: <code>/upload Welcome Voice</code>. Pro currently supports up to 5 saved media items for public users.</p>
+        </div>
+      </details>
+
+      <details class="help-item">
+        <summary><span class="help-q-icon">🎧</span><span><b>What is the difference between Voice and Audio?</b><small>Telegram voice note vs music/audio file</small></span></summary>
+        <div class="help-answer">
+          <p><b>Voice</b> sends the familiar Telegram voice-note bubble. <b>Audio</b> sends a normal audio/music-style file. Save and select the matching media type in your Media Library.</p>
+        </div>
+      </details>
+
+      <details class="help-item">
+        <summary><span class="help-q-icon">🖼️</span><span><b>Can the bot react when someone sends a photo, video, PDF or file?</b><small>Media triggers</small></span></summary>
+        <div class="help-answer">
+          <p>Yes on Pro. In the Trigger menu choose <b>Photo/image</b>, <b>Video</b>, <b>PDF document</b>, <b>Any document/file</b>, <b>Voice note</b>, <b>Audio</b>, or <b>Any media</b>, then choose the response.</p>
+        </div>
+      </details>
+
+      <details class="help-item">
+        <summary><span class="help-q-icon">✅</span><span><b>How does payment-proof or media verification work?</b><small>Approve or reject customer media</small></span></summary>
+        <div class="help-answer">
+          <ol>
+            <li>Edit the rule that asks the customer to send proof.</li>
+            <li>Enable <b>Wait for the customer’s next media and send it to my bot chat for review</b>.</li>
+            <li>Add optional messages for <b>Approve</b> and <b>Reject</b>.</li>
+            <li>When the customer sends their next media, it is forwarded to your private bot chat.</li>
+            <li>Tap <b>Approve</b> or <b>Reject</b>. The customer receives your configured result message.</li>
+          </ol>
+        </div>
+      </details>
+
+      <details class="help-item">
+        <summary><span class="help-q-icon">📚</span><span><b>What bot commands can I use?</b><small>Useful shortcuts</small></span></summary>
+        <div class="help-answer">
+          <p><code>/start</code> account setup · <code>/dashboard</code> open dashboard · <code>/library</code> list media · <code>/upload Name</code> save last media · <code>/cancel</code> clear pending upload · <code>/resetpin</code> reset dashboard PIN · <code>/help</code> bot help · <code>/terms</code> subscription terms · <code>/support your message</code> general support · <code>/paysupport your message</code> payment support.</p>
+        </div>
+      </details>
+
+      <details class="help-item">
+        <summary><span class="help-q-icon">🔐</span><span><b>I forgot my dashboard PIN. What do I do?</b><small>Secure PIN reset</small></span></summary>
+        <div class="help-answer">
+          <p>Open your own private chat with <b>@Auto_replyerbot</b> and send <code>/resetpin</code>. Then reopen the dashboard and create a new 6–12 digit PIN. Do not share your PIN with anyone.</p>
+        </div>
+      </details>
+
+      <details class="help-item">
+        <summary><span class="help-q-icon">🎁</span><span><b>How does the referral reward work?</b><small>Earn free Pro hours</small></span></summary>
+        <div class="help-answer">
+          <p>Copy your referral link from the dashboard. A referral becomes qualified after the referred person creates their account/PIN and connects Auto Replyer Bot. Every <b>2 qualified referrals</b> earns <b>1 hour of full Pro access</b>. Earned hours remain saved until your normal paid/trial access is inactive, then you can activate them one hour at a time.</p>
+        </div>
+      </details>
+
+      <details class="help-item">
+        <summary><span class="help-q-icon">⭐</span><span><b>How do subscriptions and Telegram Stars work?</b><small>Basic, Pro and renewal</small></span></summary>
+        <div class="help-answer">
+          <p>New users get a 30-day full Pro trial. <b>Basic</b> is for normal text auto-replies. <b>Pro</b> adds flows, media replies, media triggers and verification. In-Telegram digital subscriptions use Telegram Stars and renew every 30 days until renewal is canceled.</p>
+          <p>You may subscribe before the trial ends; if you do, the paid 30-day period starts immediately.</p>
+        </div>
+      </details>
+
+      <details class="help-item">
+        <summary><span class="help-q-icon">🟢</span><span><b>Why is my auto-reply not working?</b><small>Quick troubleshooting checklist</small></span></summary>
+        <div class="help-answer">
+          <ol>
+            <li>Make sure <b>Auto reply</b> is ON.</li>
+            <li>Check that <b>Profile connected</b> says Connected.</li>
+            <li>Make sure the rule itself is Enabled.</li>
+            <li>Check its Priority against other matching rules.</li>
+            <li>If using Basic, remember flows/media/verification require Pro.</li>
+            <li>If your trial/subscription expired, activate a subscription or referral hour.</li>
+            <li>For Contains rules, save a useful phrase rather than an unnecessarily long exact paragraph.</li>
+          </ol>
+        </div>
+      </details>
+
+      <details class="help-item">
+        <summary><span class="help-q-icon">🔄</span><span><b>How do I cancel or resume subscription renewal?</b><small>Keep access until paid period ends</small></span></summary>
+        <div class="help-answer">
+          <p>When a recurring Stars subscription is active, the dashboard shows a subscription-management card. Tap <b>Cancel renewal</b> to stop the next automatic charge. Your current paid access stays active until its end date. You can re-enable renewal from the same card while Telegram allows it.</p>
+        </div>
+      </details>
+
+      <details class="help-item">
+        <summary><span class="help-q-icon">🧹</span><span><b>What does “Reset seen people” do?</b><small>New-messenger testing</small></span></summary>
+        <div class="help-answer">
+          <p>It clears your bot’s memory of which customer chats have already been seen. This is mainly useful when testing a <b>New Messenger</b> rule. It does not delete your rules, media or reply history.</p>
+        </div>
+      </details>
+
+      <details class="help-item">
+        <summary><span class="help-q-icon">🆘</span><span><b>I still need help. How do I contact support?</b><small>General and payment help</small></span></summary>
+        <div class="help-answer">
+          <p>In your private bot chat, send <code>/support your question</code> for general assistance or <code>/paysupport your payment issue</code> for subscription/payment support. Your request is recorded as a support ticket.</p>
+        </div>
+      </details>
+
+      <div id="helpNoResults" class="help-no-results hidden">
+        <span>🔎</span>
+        <b>No matching help topic found</b>
+        <p>Try a shorter word such as “voice”, “flow”, “payment”, “PIN”, “priority” or “connect”.</p>
+      </div>
+    </div>
+
+    <div class="help-center-footer">
+      <span>Auto Replyer Bot Help Center</span>
+      <button id="helpExpandAll" type="button">Expand all</button>
+    </div>
+  </aside>
+
   <div id="toast" class="toast hidden"></div>
   <script src="/app.js"></script>
 </body>
