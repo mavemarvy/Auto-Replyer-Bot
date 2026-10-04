@@ -801,6 +801,66 @@ $("resetSeenBtn").addEventListener("click", async () => {
   } catch (err) { toast("Reset failed: " + err.message); }
 });
 
+
+function openHelpCenter(targetId) {
+  $("helpCenterPanel").classList.remove("hidden");
+  $("helpCenterBackdrop").classList.remove("hidden");
+  $("helpCenterPanel").setAttribute("aria-hidden","false");
+  $("helpCenterLauncher").setAttribute("aria-expanded","true");
+  document.body.classList.add("help-open");
+
+  if (targetId) {
+    const target = document.getElementById(targetId);
+    if (target) {
+      target.open = true;
+      setTimeout(() => target.scrollIntoView({behavior:"smooth",block:"start"}), 80);
+    }
+  }
+}
+
+function closeHelpCenter() {
+  $("helpCenterPanel").classList.add("hidden");
+  $("helpCenterBackdrop").classList.add("hidden");
+  $("helpCenterPanel").setAttribute("aria-hidden","true");
+  $("helpCenterLauncher").setAttribute("aria-expanded","false");
+  document.body.classList.remove("help-open");
+}
+
+$("helpCenterLauncher").addEventListener("click", () => openHelpCenter());
+$("helpCenterClose").addEventListener("click", closeHelpCenter);
+$("helpCenterBackdrop").addEventListener("click", closeHelpCenter);
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !$("helpCenterPanel").classList.contains("hidden")) closeHelpCenter();
+});
+
+document.querySelectorAll("[data-help-target]").forEach((button) => {
+  button.addEventListener("click", () => openHelpCenter(button.dataset.helpTarget));
+});
+
+$("helpCenterSearch").addEventListener("input", (e) => {
+  const query = String(e.target.value || "").toLowerCase().trim();
+  let visible = 0;
+  document.querySelectorAll("#helpQuestions .help-item").forEach((item) => {
+    const haystack = item.textContent.toLowerCase();
+    const match = !query || haystack.includes(query);
+    item.classList.toggle("hidden", !match);
+    if (match) {
+      visible++;
+      if (query) item.open = true;
+    }
+  });
+  $("helpNoResults").classList.toggle("hidden", visible !== 0);
+});
+
+$("helpExpandAll").addEventListener("click", () => {
+  const items = Array.from(document.querySelectorAll("#helpQuestions .help-item"))
+    .filter((item) => !item.classList.contains("hidden"));
+  const shouldOpen = items.some((item) => !item.open);
+  items.forEach((item) => item.open = shouldOpen);
+  $("helpExpandAll").textContent = shouldOpen ? "Collapse all" : "Expand all";
+});
+
 (async function init() {
   updateFormVisibility();
   setAuthenticated(false);
